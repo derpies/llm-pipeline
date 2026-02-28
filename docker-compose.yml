@@ -1,21 +1,39 @@
+networks:
+  llmpipe-net:
+
+volumes:
+  llmpipe-pgdata:
+  llmpipe-redisdata:
+  llmpipe-uv-cache:
+  llmpipe-chroma:
+
 services:
   app:
+    container_name: llmpipe-app
     build: .
     volumes:
       - .:/app
-      - uv-cache:/root/.cache/uv
+      - llmpipe-uv-cache:/root/.cache/uv
+      - llmpipe-chroma:/data/chroma
+      - ./raw-logs:/data/raw-logs:ro
+      - ./output:/data/output
     env_file:
       - .env
     ports:
       - "20000:8000"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     stdin_open: true
     tty: true
-    command: sleep infinity  # Keep alive for exec usage
+    command: sleep infinity
+    networks:
+      - llmpipe-net
 
   postgres:
+    container_name: llmpipe-postgres
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: llm_pipeline
@@ -24,16 +42,29 @@ services:
     ports:
       - "20001:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - llmpipe-pgdata:/var/lib/postgresql/data
+      - ./infra/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llm_pipeline -d llm_pipeline"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - llmpipe-net
 
   redis:
+    container_name: llmpipe-redis
     image: redis:7-alpine
     ports:
       - "20002:6379"
     volumes:
-      - redisdata:/data
-
-volumes:
-  pgdata:
-  redisdata:
-  uv-cache:
+      - llmpipe-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - llmpipe-net

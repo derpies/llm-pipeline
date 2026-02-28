@@ -124,6 +124,21 @@ class DeliveryEvent(BaseModel, extra="ignore"):
     from_address: str = ""
     headers: dict[str, Any] = Field(default_factory=dict)
 
+    # --- Derived fields (populated by model_validator) ---
+    xmrid_account_id: str = ""
+    xmrid_contact_id: str = ""
+    xmrid_drip_id: str = ""
+    last_active_ts: float = 0.0
+    contact_added_ts: float = 0.0
+    op_queue_time_parsed: float = 0.0
+    marketing_flag: int = 0
+    is_zero_cohort: bool = False
+    listid_type: str = ""
+    engagement_segment: str = ""
+    compliance_status: str = ""
+    pre_edge_latency: float | None = None
+    delivery_attempt_time: float | None = None
+
     @model_validator(mode="before")
     @classmethod
     def coerce_nulls(cls, data: Any) -> Any:
@@ -133,6 +148,52 @@ class DeliveryEvent(BaseModel, extra="ignore"):
                 if val is None:
                     data[key] = ""
         return data
+
+    @model_validator(mode="after")
+    def populate_derived_fields(self) -> DeliveryEvent:
+        """Parse composite fields and populate derived attributes."""
+        from llm_pipeline.email_analytics.parsers import (
+            classify_listid,
+            parse_clicktrackingid,
+            parse_compliance_header,
+        )
+
+        # Parse clicktrackingid
+        parsed = parse_clicktrackingid(self.clicktrackingid)
+        if parsed is not None:
+            self.xmrid_account_id = parsed.xmrid.account_id
+            self.xmrid_contact_id = parsed.xmrid.contact_id
+            self.xmrid_drip_id = parsed.xmrid.drip_id
+            self.last_active_ts = parsed.last_active_adjusted
+            self.contact_added_ts = parsed.contact_added
+            self.op_queue_time_parsed = parsed.op_queue_time
+            self.marketing_flag = parsed.marketing
+            self.is_zero_cohort = parsed.xmrid.is_zero_cohort
+
+        # Classify listid
+        lid_type, seg = classify_listid(self.listid)
+        self.listid_type = lid_type.value
+        self.engagement_segment = seg
+
+        # Parse compliance header (raw data may have list or string)
+        header_val = self.headers.get("x-op-mail-domains", "")
+        if isinstance(header_val, list):
+            header_val = header_val[0] if header_val else ""
+        self.compliance_status = parse_compliance_header(header_val).value
+
+        # Compute latencies
+        if parsed is not None and parsed.op_queue_time > 0 and self.injected_time:
+            self.pre_edge_latency = self.injected_time - parsed.op_queue_time
+
+        ts_float = (
+            self.timestamp
+            if isinstance(self.timestamp, (int, float))
+            else self.timestamp.timestamp()
+        )
+        if self.injected_time and self.injected_time > 0:
+            self.delivery_attempt_time = ts_float - self.injected_time
+
+        return self
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -185,6 +246,14 @@ class AggregationBucket(BaseModel):
     deferral_rate: float = 0.0
     complaint_rate: float = 0.0
 
+    # Latency stats (None when no data available)
+    pre_edge_latency_mean: float | None = None
+    pre_edge_latency_p50: float | None = None
+    pre_edge_latency_p95: float | None = None
+    delivery_time_mean: float | None = None
+    delivery_time_p50: float | None = None
+    delivery_time_p95: float | None = None
+
 
 class AnomalyFinding(BaseModel):
     """A detected anomaly in a metric."""
@@ -213,6 +282,18 @@ class TrendFinding(BaseModel):
     end_value: float
 
 
+class DataCompleteness(BaseModel):
+    """Zero-value rates for a field within a dimension slice."""
+
+    time_window: datetime
+    dimension: str
+    dimension_value: str
+    total_records: int
+    field_name: str
+    zero_count: int
+    zero_rate: float
+
+
 class AnalysisReport(BaseModel):
     """Complete output of an email analytics run."""
 
@@ -222,6 +303,7 @@ class AnalysisReport(BaseModel):
     files_processed: int = 0
     events_parsed: int = 0
     aggregations: list[AggregationBucket] = Field(default_factory=list)
+    completeness: list[DataCompleteness] = Field(default_factory=list)
     anomalies: list[AnomalyFinding] = Field(default_factory=list)
     trends: list[TrendFinding] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
@@ -253,6 +335,12 @@ class AggregationRecord(Base):
     bounce_rate: Mapped[float] = mapped_column(Float, default=0.0)
     deferral_rate: Mapped[float] = mapped_column(Float, default=0.0)
     complaint_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    pre_edge_latency_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pre_edge_latency_p50: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pre_edge_latency_p95: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delivery_time_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delivery_time_p50: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delivery_time_p95: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -290,6 +378,23 @@ class TrendRecord(Base):
     num_points: Mapped[int] = mapped_column(Integer)
     start_value: Mapped[float] = mapped_column(Float)
     end_value: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class DataCompletenessRecord(Base):
+    __tablename__ = "email_data_completeness"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    time_window: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    dimension: Mapped[str] = mapped_column(String(64))
+    dimension_value: Mapped[str] = mapped_column(String(256))
+    total_records: Mapped[int] = mapped_column(Integer, default=0)
+    field_name: Mapped[str] = mapped_column(String(64))
+    zero_count: Mapped[int] = mapped_column(Integer, default=0)
+    zero_rate: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

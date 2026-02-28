@@ -12,6 +12,18 @@ class Settings(BaseSettings):
     llm_provider: str = "anthropic"
     llm_model: str = "claude-sonnet-4-20250514"
 
+    # Per-agent model selection
+    model_orchestrator: str = "claude-sonnet-4-20250514"
+    model_investigator: str = "claude-sonnet-4-20250514"
+    model_investigator_deep: str = "claude-opus-4-20250514"
+    model_synthesizer: str = "claude-sonnet-4-20250514"
+    model_curator: str = "claude-haiku-4-5-20251001"
+
+    # Circuit breaker thresholds
+    circuit_breaker_max_iterations: int = 5
+    circuit_breaker_max_tokens: int = 100_000
+    circuit_breaker_max_seconds: int = 300
+
     # Postgres
     database_url: str = "postgresql://llm_pipeline:llm_pipeline@postgres:5432/llm_pipeline"
 
@@ -23,7 +35,7 @@ class Settings(BaseSettings):
     embedding_model: str = ""  # empty = provider default
 
     # ChromaDB
-    chroma_persist_dir: str = "./chroma_data"
+    chroma_persist_dir: str = "/data/chroma"
 
     # Ingestion
     chunk_size: int = 1000

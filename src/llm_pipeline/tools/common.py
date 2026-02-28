@@ -1,4 +1,4 @@
-"""Tool registry and built-in tools for the agent."""
+"""Shared tools available to all agents."""
 
 from datetime import UTC, datetime
 
@@ -31,8 +31,8 @@ def retrieve_documents(query: str) -> str:
     return "\n\n---\n\n".join(results)
 
 
-# Tool registry — add new tools here
-TOOLS: list = [
+# Chat agent tools — the legacy tool set
+CHAT_TOOLS: list = [
     get_current_datetime,
     retrieve_documents,
 ]

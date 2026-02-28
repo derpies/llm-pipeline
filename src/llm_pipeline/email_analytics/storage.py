@@ -19,6 +19,8 @@ from llm_pipeline.email_analytics.models import (
     AnomalyRecord,
     AnomalyType,
     Base,
+    DataCompleteness,
+    DataCompletenessRecord,
     TrendDirection,
     TrendFinding,
     TrendRecord,
@@ -82,6 +84,27 @@ def store_results(report: AnalysisReport) -> None:
                     bounce_rate=agg.bounce_rate,
                     deferral_rate=agg.deferral_rate,
                     complaint_rate=agg.complaint_rate,
+                    pre_edge_latency_mean=agg.pre_edge_latency_mean,
+                    pre_edge_latency_p50=agg.pre_edge_latency_p50,
+                    pre_edge_latency_p95=agg.pre_edge_latency_p95,
+                    delivery_time_mean=agg.delivery_time_mean,
+                    delivery_time_p50=agg.delivery_time_p50,
+                    delivery_time_p95=agg.delivery_time_p95,
+                )
+            )
+
+        # Store completeness
+        for comp in report.completeness:
+            session.add(
+                DataCompletenessRecord(
+                    run_id=report.run_id,
+                    time_window=comp.time_window,
+                    dimension=comp.dimension,
+                    dimension_value=comp.dimension_value,
+                    total_records=comp.total_records,
+                    field_name=comp.field_name,
+                    zero_count=comp.zero_count,
+                    zero_rate=comp.zero_rate,
                 )
             )
 
@@ -120,9 +143,10 @@ def store_results(report: AnalysisReport) -> None:
 
         session.commit()
         logger.info(
-            "Stored analysis run %s: %d aggregations, %d anomalies, %d trends",
+            "Stored analysis run %s: %d aggregations, %d completeness, %d anomalies, %d trends",
             report.run_id,
             len(report.aggregations),
+            len(report.completeness),
             len(report.anomalies),
             len(report.trends),
         )
@@ -154,6 +178,12 @@ def load_historical_aggregations(
                 bounce_rate=row.bounce_rate,
                 deferral_rate=row.deferral_rate,
                 complaint_rate=row.complaint_rate,
+                pre_edge_latency_mean=getattr(row, "pre_edge_latency_mean", None),
+                pre_edge_latency_p50=getattr(row, "pre_edge_latency_p50", None),
+                pre_edge_latency_p95=getattr(row, "pre_edge_latency_p95", None),
+                delivery_time_mean=getattr(row, "delivery_time_mean", None),
+                delivery_time_p50=getattr(row, "delivery_time_p50", None),
+                delivery_time_p95=getattr(row, "delivery_time_p95", None),
             )
             for row in rows
         ]
@@ -172,6 +202,10 @@ def load_report(run_id: str) -> AnalysisReport | None:
 
         agg_rows = session.execute(
             select(AggregationRecord).where(AggregationRecord.run_id == run_id)
+        ).scalars().all()
+
+        comp_rows = session.execute(
+            select(DataCompletenessRecord).where(DataCompletenessRecord.run_id == run_id)
         ).scalars().all()
 
         anomaly_rows = session.execute(
@@ -196,8 +230,27 @@ def load_report(run_id: str) -> AnalysisReport | None:
                 bounce_rate=r.bounce_rate,
                 deferral_rate=r.deferral_rate,
                 complaint_rate=r.complaint_rate,
+                pre_edge_latency_mean=getattr(r, "pre_edge_latency_mean", None),
+                pre_edge_latency_p50=getattr(r, "pre_edge_latency_p50", None),
+                pre_edge_latency_p95=getattr(r, "pre_edge_latency_p95", None),
+                delivery_time_mean=getattr(r, "delivery_time_mean", None),
+                delivery_time_p50=getattr(r, "delivery_time_p50", None),
+                delivery_time_p95=getattr(r, "delivery_time_p95", None),
             )
             for r in agg_rows
+        ]
+
+        completeness = [
+            DataCompleteness(
+                time_window=r.time_window,
+                dimension=r.dimension,
+                dimension_value=r.dimension_value,
+                total_records=r.total_records,
+                field_name=r.field_name,
+                zero_count=r.zero_count,
+                zero_rate=r.zero_rate,
+            )
+            for r in comp_rows
         ]
 
         anomalies = [
@@ -238,6 +291,7 @@ def load_report(run_id: str) -> AnalysisReport | None:
             files_processed=run.files_processed,
             events_parsed=run.events_parsed,
             aggregations=aggregations,
+            completeness=completeness,
             anomalies=anomalies,
             trends=trends,
             errors=errors,

@@ -50,26 +50,41 @@ def _process_file(state: FileProcessingState) -> dict:
     file_path = state["file_path"]
     json_format = state.get("json_format")
     try:
-        buckets, count = aggregate_file(file_path, json_format=json_format)
+        result = aggregate_file(file_path, json_format=json_format)
     except Exception as exc:
         return {"errors": [f"Failed to process {file_path}: {exc}"], "event_count": 0}
 
-    logger.info("Processed %d events from %s into %d buckets", count, file_path, len(buckets))
-    return {"aggregations": buckets, "event_count": count}
+    logger.info(
+        "Processed %d events from %s into %d buckets",
+        result.event_count, file_path, len(result.buckets),
+    )
+    return {
+        "aggregations": result.buckets,
+        "completeness": result.completeness,
+        "event_count": result.event_count,
+    }
 
 
 def _merge_aggregations(state: EmailAnalyticsState) -> dict:
     """Deduplicate fan-in concatenated buckets across all files."""
-    from llm_pipeline.email_analytics.aggregator import merge_bucket_list
+    from llm_pipeline.email_analytics.aggregator import (
+        merge_bucket_list,
+        merge_completeness,
+    )
 
     raw_buckets = state.get("aggregations", [])
     merged = merge_bucket_list(raw_buckets)
+
+    raw_completeness = state.get("completeness", [])
+    merged_comp = merge_completeness(raw_completeness)
+
     logger.info(
-        "Merged %d fan-in buckets into %d unique buckets",
+        "Merged %d fan-in buckets into %d unique buckets, %d completeness records",
         len(raw_buckets),
         len(merged),
+        len(merged_comp),
     )
-    return {"merged_aggregations": merged}
+    return {"merged_aggregations": merged, "merged_completeness": merged_comp}
 
 
 def _detect_anomalies(state: EmailAnalyticsState) -> dict:
@@ -116,6 +131,7 @@ def _store_results(state: EmailAnalyticsState) -> dict:
         files_processed=len(state.get("file_paths", [])),
         events_parsed=state.get("event_count", 0),
         aggregations=state.get("merged_aggregations", []),
+        completeness=state.get("merged_completeness", []),
         anomalies=state.get("anomalies", []),
         trends=state.get("trends", []),
         errors=state.get("errors", []),

@@ -25,7 +25,9 @@ def chat() -> None:
     setup_logging()
 
     # Lazy import so startup is fast and config errors surface at use-time
-    from llm_pipeline.agent.graph import agent
+    from llm_pipeline.agents.chat import build_chat_graph
+
+    agent = build_chat_graph()
 
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
@@ -159,6 +161,72 @@ def analyze_email(
 
     if summarize:
         _run_summarization(report)
+
+
+@app.command()
+def investigate(
+    path: Annotated[Path, typer.Argument(help="File or directory of email delivery JSON data")],
+    json_format: Annotated[
+        str,
+        typer.Option(
+            "--json-format",
+            "-f",
+            help="JSON format: 'ndjson' or 'concatenated'",
+        ),
+    ] = "ndjson",
+    run_id: Annotated[
+        str | None,
+        typer.Option("--run-id", "-r", help="Use a previous ML run instead of re-analyzing"),
+    ] = None,
+) -> None:
+    """Run the investigation cycle — ML analysis → agent investigation → findings."""
+    setup_logging()
+
+    from llm_pipeline.email_analytics.storage import init_db, load_report
+
+    init_db()
+
+    # Either load existing report or run ML analysis first
+    if run_id:
+        report = load_report(run_id)
+        if not report:
+            typer.echo(f"No analysis run found with run_id={run_id}")
+            raise typer.Exit(1)
+        typer.echo(f"Loaded existing report: {run_id}")
+    else:
+        from llm_pipeline.email_analytics.graph import build_email_analytics_graph
+
+        typer.echo("Running ML analysis...")
+        ml_graph = build_email_analytics_graph()
+        ml_result = ml_graph.invoke({
+            "input_path": str(path.resolve()),
+            "json_format": json_format,
+        })
+        report = ml_result.get("report")
+        if not report:
+            typer.echo("ML analysis produced no report.")
+            raise typer.Exit(1)
+        typer.echo(
+            f"ML analysis complete: {len(report.anomalies)} anomalies, "
+            f"{len(report.trends)} trends"
+        )
+
+    # Run the investigation cycle
+    from llm_pipeline.agents.graph import build_investigation_graph
+
+    typer.echo("\nStarting investigation cycle...")
+    graph = build_investigation_graph()
+    result = graph.invoke({
+        "ml_report": report,
+        "run_id": report.run_id,
+    })
+
+    # Print checkpoint digest
+    digest = result.get("checkpoint_digest", "")
+    if digest:
+        typer.echo(f"\n{digest}")
+    else:
+        typer.echo("\nInvestigation complete (no digest produced).")
 
 
 @app.command()

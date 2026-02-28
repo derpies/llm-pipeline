@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from llm_pipeline.email_analytics.aggregator import (
     aggregate,
     aggregate_file,
+    compute_data_completeness,
     events_to_dataframe,
     merge_bucket_list,
 )
@@ -26,12 +27,20 @@ class TestEventsToDataframe:
         df = events_to_dataframe([], [])
         assert df.is_empty()
         assert "timestamp" in df.columns
+        assert "listid" in df.columns
 
     def test_basic_conversion(self, sample_events, sample_classifications):
         df = events_to_dataframe(sample_events, sample_classifications)
         assert len(df) == 5
         assert "normalized_status" in df.columns
         assert "recipient_domain" in df.columns
+        assert "listid" in df.columns
+        assert "listid_type" in df.columns
+        assert "engagement_segment" in df.columns
+        assert "xmrid_account_id" in df.columns
+        assert "compliance_status" in df.columns
+        assert "pre_edge_latency" in df.columns
+        assert "delivery_attempt_time" in df.columns
 
 
 class TestAggregate:
@@ -71,6 +80,34 @@ class TestAggregate:
         assert "10.0.0.1" in ip_values
         assert "10.0.0.2" in ip_values
 
+    def test_listid_dimension(self, sample_events, sample_classifications):
+        df = events_to_dataframe(sample_events, sample_classifications)
+        buckets = aggregate(df, window_hours=1, dimensions=["listid"])
+
+        listid_values = {b.dimension_value for b in buckets}
+        assert "SEG_E_VH" in listid_values
+        assert "SEG_E_H" in listid_values
+        assert "SEG_E_M" in listid_values
+
+    def test_engagement_segment_dimension(self, sample_events, sample_classifications):
+        df = events_to_dataframe(sample_events, sample_classifications)
+        buckets = aggregate(df, window_hours=1, dimensions=["engagement_segment"])
+
+        seg_values = {b.dimension_value for b in buckets}
+        assert "VH" in seg_values
+        assert "H" in seg_values
+        assert "M" in seg_values
+
+    def test_latency_fields(self, sample_events, sample_classifications):
+        df = events_to_dataframe(sample_events, sample_classifications)
+        buckets = aggregate(df, window_hours=1, dimensions=["listid"])
+
+        vh_buckets = [b for b in buckets if b.dimension_value == "SEG_E_VH"]
+        assert len(vh_buckets) == 1
+        # These events have injected_time and op_queue_time set
+        assert vh_buckets[0].pre_edge_latency_mean is not None
+        assert vh_buckets[0].delivery_time_mean is not None
+
     def test_time_window_truncation(self):
         events = [
             DeliveryEvent(
@@ -97,6 +134,33 @@ class TestAggregate:
         # Events at 10:15 and 10:45 should fall in the same 1-hour window
         windows = {b.time_window for b in buckets}
         assert len(windows) == 2  # hour 10 and hour 11
+
+
+class TestComputeDataCompleteness:
+    def test_completeness_basic(self, sample_events, sample_classifications):
+        df = events_to_dataframe(sample_events, sample_classifications)
+        results = compute_data_completeness(df, window_hours=1, dimensions=["listid"])
+        assert len(results) > 0
+
+        # Check that field_name is one of our tracked fields
+        field_names = {r.field_name for r in results}
+        assert "xmrid_account_id" in field_names
+
+    def test_zero_cohort_completeness(self, zero_cohort_events):
+        clf = [SmtpClassification(category=SmtpCategory.SUCCESS, confidence=0.9)]
+        df = events_to_dataframe(zero_cohort_events, clf)
+        results = compute_data_completeness(df, window_hours=1, dimensions=["listid"])
+
+        # Zero-cohort events should have high zero rates for account/contact fields
+        acct_results = [r for r in results if r.field_name == "xmrid_account_id"]
+        assert len(acct_results) > 0
+        # account_id is "0" → empty string in xmrid_account_id
+        assert acct_results[0].zero_rate == 1.0
+
+    def test_empty_dataframe(self):
+        df = events_to_dataframe([], [])
+        results = compute_data_completeness(df)
+        assert results == []
 
 
 class TestMergeBucketList:
@@ -173,6 +237,28 @@ class TestMergeBucketList:
         assert b.delivery_rate == 0.5
         assert b.bounce_rate == 0.5
 
+    def test_latency_weighted_merge(self):
+        buckets = [
+            AggregationBucket(
+                time_window=_ts(10), dimension="d", dimension_value="v",
+                total=10, delivered=10, bounced=0, deferred=0, complained=0,
+                delivery_rate=1.0, bounce_rate=0.0,
+                deferral_rate=0.0, complaint_rate=0.0,
+                pre_edge_latency_mean=2.0, delivery_time_mean=1.0,
+            ),
+            AggregationBucket(
+                time_window=_ts(10), dimension="d", dimension_value="v",
+                total=10, delivered=10, bounced=0, deferred=0, complained=0,
+                delivery_rate=1.0, bounce_rate=0.0,
+                deferral_rate=0.0, complaint_rate=0.0,
+                pre_edge_latency_mean=4.0, delivery_time_mean=3.0,
+            ),
+        ]
+        merged = merge_bucket_list(buckets)
+        b = merged[0]
+        assert b.pre_edge_latency_mean == 3.0  # weighted mean: (2*10 + 4*10) / 20
+        assert b.delivery_time_mean == 2.0
+
 
 class TestAggregateFile:
     def test_processes_file_end_to_end(self, tmp_path):
@@ -183,7 +269,8 @@ class TestAggregateFile:
                 "message": "250 OK",
                 "recipient": "user@gmail.com",
                 "outmtaid_ip": "10.0.0.1",
-                "sendid": "c1",
+                "listid": "SEG_E_VH",
+                "sendid": "SEG_E_VH260101",
             },
             {
                 "timestamp": "2025-01-01T10:05:00Z",
@@ -191,18 +278,20 @@ class TestAggregateFile:
                 "message": "550 5.1.1 User unknown",
                 "recipient": "bad@yahoo.com",
                 "outmtaid_ip": "10.0.0.1",
-                "sendid": "c1",
+                "listid": "SEG_E_H",
+                "sendid": "SEG_E_H260101",
             },
         ]
         f = tmp_path / "test.json"
         f.write_text("".join(json.dumps(e) for e in events))
 
-        buckets, count = aggregate_file(f, chunk_size=10, json_format="concatenated")
-        assert count == 2
-        assert len(buckets) > 0
+        result = aggregate_file(f, chunk_size=10, json_format="concatenated")
+        assert result.event_count == 2
+        assert len(result.buckets) > 0
         # Should have buckets for multiple dimensions
-        dims = {b.dimension for b in buckets}
+        dims = {b.dimension for b in result.buckets}
         assert "recipient_domain" in dims
+        assert "listid" in dims
 
     def test_returns_correct_event_count(self, tmp_path):
         events = [
@@ -212,8 +301,8 @@ class TestAggregateFile:
         f = tmp_path / "test.json"
         f.write_text("".join(json.dumps(e) for e in events))
 
-        _, count = aggregate_file(f, chunk_size=4, json_format="concatenated")
-        assert count == 15
+        result = aggregate_file(f, chunk_size=4, json_format="concatenated")
+        assert result.event_count == 15
 
     def test_multi_chunk_merge(self, tmp_path):
         """Buckets from multiple chunks with same keys should merge."""
@@ -229,10 +318,29 @@ class TestAggregateFile:
         f = tmp_path / "test.json"
         f.write_text("".join(json.dumps(e) for e in events))
 
-        buckets, count = aggregate_file(
+        result = aggregate_file(
             f, chunk_size=2, dimensions=["recipient_domain"], json_format="concatenated"
         )
-        assert count == 6
-        gmail = [b for b in buckets if b.dimension_value == "gmail.com"]
+        assert result.event_count == 6
+        gmail = [b for b in result.buckets if b.dimension_value == "gmail.com"]
         assert len(gmail) == 1
         assert gmail[0].total == 6
+
+    def test_completeness_in_result(self, tmp_path):
+        events = [
+            {
+                "timestamp": "2025-01-01T10:00:00Z",
+                "status": "delivered",
+                "message": "250 OK",
+                "listid": "SEG_E_VH",
+                "clicktrackingid": (
+                    "0.266907.69781.478016969.1342.104.0"
+                    ";1770154650;1755011403;1771487908;q;1"
+                ),
+            },
+        ]
+        f = tmp_path / "test.json"
+        f.write_text("".join(json.dumps(e) for e in events))
+
+        result = aggregate_file(f, chunk_size=10, json_format="concatenated")
+        assert len(result.completeness) > 0

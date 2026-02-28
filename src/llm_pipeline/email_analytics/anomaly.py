@@ -43,6 +43,49 @@ _METRIC_TO_ANOMALY_LOW: dict[str, AnomalyType] = {
 # Minimum number of historical data points needed for anomaly detection
 MIN_SAMPLE_SIZE = 5
 
+# Segment-aware baseline expectations.  When historical data is sparse
+# (< MIN_SAMPLE_SIZE), these priors provide reasonable defaults so anomaly
+# detection isn't skipped entirely for new segments.
+# Keys are engagement segment codes; values are {metric: expected_value}.
+_SEGMENT_BASELINES: dict[str, dict[str, float]] = {
+    "VH": {
+        "delivery_rate": 0.95, "bounce_rate": 0.02,
+        "deferral_rate": 0.02, "complaint_rate": 0.001,
+    },
+    "H": {
+        "delivery_rate": 0.93, "bounce_rate": 0.03,
+        "deferral_rate": 0.03, "complaint_rate": 0.002,
+    },
+    "M": {
+        "delivery_rate": 0.90, "bounce_rate": 0.04,
+        "deferral_rate": 0.04, "complaint_rate": 0.003,
+    },
+    "L": {
+        "delivery_rate": 0.85, "bounce_rate": 0.06,
+        "deferral_rate": 0.06, "complaint_rate": 0.005,
+    },
+    "VL": {
+        "delivery_rate": 0.75, "bounce_rate": 0.10,
+        "deferral_rate": 0.10, "complaint_rate": 0.008,
+    },
+    "RO": {
+        "delivery_rate": 0.65, "bounce_rate": 0.15,
+        "deferral_rate": 0.12, "complaint_rate": 0.010,
+    },
+    "NM": {
+        "delivery_rate": 0.55, "bounce_rate": 0.20,
+        "deferral_rate": 0.15, "complaint_rate": 0.012,
+    },
+    "DS": {
+        "delivery_rate": 0.40, "bounce_rate": 0.30,
+        "deferral_rate": 0.18, "complaint_rate": 0.015,
+    },
+    "UK": {
+        "delivery_rate": 0.88, "bounce_rate": 0.05,
+        "deferral_rate": 0.05, "complaint_rate": 0.003,
+    },
+}
+
 
 def _modified_z_score(value: float, values: np.ndarray) -> float:
     """Compute modified z-score using MAD (Median Absolute Deviation).
@@ -50,6 +93,9 @@ def _modified_z_score(value: float, values: np.ndarray) -> float:
     Falls back to standard z-score when MAD=0 (all values identical).
     The constant 0.6745 is the 0.75 quantile of the standard normal,
     used to make MAD consistent with standard deviation.
+
+    When all baseline values are identical and the current value differs,
+    returns a large z-score (sign matches direction of deviation).
     """
     median = np.median(values)
     mad = np.median(np.abs(values - median))
@@ -60,6 +106,10 @@ def _modified_z_score(value: float, values: np.ndarray) -> float:
     std = np.std(values)
     if std > 0:
         return (value - np.mean(values)) / std
+    # All values identical — if current value differs, it's extreme
+    if value != median:
+        # Return a large z-score; sign indicates direction
+        return 10.0 if value > median else -10.0
     return 0.0
 
 
@@ -103,16 +153,29 @@ def detect_anomalies(
     for bucket in current:
         key = (bucket.dimension, bucket.dimension_value)
         hist = hist_map.get(key)
-        if not hist:
-            continue
 
         for metric in metrics:
-            hist_values = hist.get(metric, [])
-            if len(hist_values) < MIN_SAMPLE_SIZE:
+            hist_values = hist.get(metric, []) if hist else []
+            n_hist = len(hist_values)
+
+            if n_hist >= MIN_SAMPLE_SIZE:
+                # Enough historical data — use it directly
+                arr = np.array(hist_values, dtype=float)
+            elif bucket.dimension == "engagement_segment":
+                # Sparse history for a segment — use segment baseline as prior
+                seg_baseline = _SEGMENT_BASELINES.get(bucket.dimension_value)
+                if seg_baseline is None or metric not in seg_baseline:
+                    continue
+                baseline_val = seg_baseline[metric]
+                # Blend: generate synthetic data points from segment baseline,
+                # weighted so that as real history grows it dominates.
+                synthetic_count = MIN_SAMPLE_SIZE - n_hist
+                synthetic = [baseline_val] * synthetic_count
+                arr = np.array(hist_values + synthetic, dtype=float)
+            else:
                 continue
 
             current_value = getattr(bucket, metric)
-            arr = np.array(hist_values, dtype=float)
             z = _modified_z_score(current_value, arr)
 
             # Direction-aware: only flag meaningful directions

@@ -9,6 +9,7 @@ from llm_pipeline.email_analytics.models import (
     AggregationBucket,
     AnalysisReport,
     AnomalyFinding,
+    DataCompleteness,
     TrendFinding,
 )
 
@@ -19,6 +20,7 @@ class FileProcessingState(TypedDict, total=False):
     file_path: str
     json_format: str  # "ndjson" or "concatenated"
     aggregations: list[AggregationBucket]
+    completeness: list[DataCompleteness]
     event_count: int
     errors: list[str]
 
@@ -38,11 +40,13 @@ class EmailAnalyticsState(TypedDict, total=False):
 
     # Accumulated from file processing (fan-in via operator.add)
     aggregations: Annotated[list[AggregationBucket], operator.add]
+    completeness: Annotated[list[DataCompleteness], operator.add]
     event_count: Annotated[int, operator.add]
     errors: Annotated[list[str], operator.add]
 
     # Merged aggregation output (deduplicated across files)
     merged_aggregations: list[AggregationBucket]
+    merged_completeness: list[DataCompleteness]
 
     # Analysis output
     anomalies: list[AnomalyFinding]
