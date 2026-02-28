@@ -98,5 +98,109 @@ def ingest(
                 typer.echo(f"  - {err}")
 
 
+@app.command()
+def analyze_email(
+    path: Annotated[Path, typer.Argument(help="File or directory of email delivery JSON data")],
+    json_format: Annotated[
+        str,
+        typer.Option(
+            "--json-format",
+            "-f",
+            help="JSON format: 'ndjson' (one object per line) or 'concatenated' ({…}{…}{…})",
+        ),
+    ] = "ndjson",
+    summarize: Annotated[
+        bool,
+        typer.Option("--summarize", "-s", help="Generate plain-language documents after analysis"),
+    ] = False,
+) -> None:
+    """Analyze email delivery data — aggregate, detect anomalies, find trends."""
+    setup_logging()
+
+    from llm_pipeline.email_analytics.graph import build_email_analytics_graph
+
+    graph = build_email_analytics_graph()
+    result = graph.invoke({"input_path": str(path.resolve()), "json_format": json_format})
+
+    report = result.get("report")
+    if not report:
+        typer.echo("No report generated.")
+        raise typer.Exit(1)
+
+    typer.echo(f"\nEmail Analytics Report (run_id={report.run_id})")
+    typer.echo(f"  Files processed: {report.files_processed}")
+    typer.echo(f"  Events parsed:   {report.events_parsed}")
+    typer.echo(f"  Aggregations:    {len(report.aggregations)}")
+    typer.echo(f"  Anomalies:       {len(report.anomalies)}")
+    typer.echo(f"  Trends:          {len(report.trends)}")
+
+    if report.anomalies:
+        typer.echo("\nAnomalies:")
+        for a in report.anomalies:
+            typer.echo(
+                f"  [{a.severity}] {a.anomaly_type.value}: {a.dimension}={a.dimension_value} "
+                f"({a.metric}: {a.current_value:.4f}, baseline: {a.baseline_mean:.4f}, "
+                f"z={a.z_score:.2f})"
+            )
+
+    if report.trends:
+        typer.echo("\nTrends:")
+        for t in report.trends:
+            typer.echo(
+                f"  {t.direction.value}: {t.dimension}={t.dimension_value} "
+                f"({t.metric}: {t.start_value:.4f} → {t.end_value:.4f}, "
+                f"R²={t.r_squared:.3f})"
+            )
+
+    if report.errors:
+        typer.echo(f"\nErrors ({len(report.errors)}):")
+        for err in report.errors:
+            typer.echo(f"  - {err}")
+
+    if summarize:
+        _run_summarization(report)
+
+
+@app.command()
+def summarize(
+    run_id: Annotated[str, typer.Argument(help="Run ID of a previous email analytics run")],
+) -> None:
+    """Generate plain-language documents from a previous email analytics run."""
+    setup_logging()
+
+    from llm_pipeline.email_analytics.storage import init_db, load_report
+
+    init_db()
+    report = load_report(run_id)
+    if not report:
+        typer.echo(f"No analysis run found with run_id={run_id}")
+        raise typer.Exit(1)
+
+    typer.echo(f"Loaded report {run_id}: {len(report.aggregations)} aggregations, "
+               f"{len(report.anomalies)} anomalies, {len(report.trends)} trends")
+    _run_summarization(report)
+
+
+def _run_summarization(report) -> None:
+    """Shared helper to run summarization and print results."""
+    from llm_pipeline.summarization.graph import build_summarization_graph
+
+    typer.echo("\nGenerating plain-language documents...")
+    graph = build_summarization_graph()
+    result = graph.invoke({"report": report, "run_id": report.run_id})
+
+    summ_result = result.get("result")
+    if summ_result:
+        typer.echo("\nSummarization complete:")
+        typer.echo(f"  Documents generated: {summ_result.documents_generated}")
+        typer.echo(f"  Chunks stored:       {summ_result.chunks_stored}")
+        if summ_result.errors:
+            typer.echo(f"  Errors ({len(summ_result.errors)}):")
+            for err in summ_result.errors:
+                typer.echo(f"    - {err}")
+    else:
+        typer.echo("Summarization produced no result.")
+
+
 if __name__ == "__main__":
     app()

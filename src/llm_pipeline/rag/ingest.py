@@ -4,21 +4,39 @@ from pathlib import Path
 
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import TextLoader
-from langchain_openai import OpenAIEmbeddings
+from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from llm_pipeline.config import settings
 
+_HUGGINGFACE_DEFAULT_MODEL = "all-MiniLM-L6-v2"
+_OPENAI_DEFAULT_MODEL = "text-embedding-3-small"
+
+
+def get_embeddings() -> Embeddings:
+    """Return an embeddings instance based on config."""
+    provider = settings.embedding_provider.lower()
+    if provider == "huggingface":
+        from langchain_huggingface import HuggingFaceEmbeddings
+
+        model_name = settings.embedding_model or _HUGGINGFACE_DEFAULT_MODEL
+        return HuggingFaceEmbeddings(model_name=model_name)
+    elif provider == "openai":
+        from langchain_openai import OpenAIEmbeddings
+
+        model = settings.embedding_model or _OPENAI_DEFAULT_MODEL
+        return OpenAIEmbeddings(model=model, api_key=settings.openai_api_key)
+    else:
+        raise ValueError(
+            f"Unknown embedding_provider: {provider!r}. Use 'huggingface' or 'openai'."
+        )
+
 
 def get_vectorstore() -> Chroma:
     """Return a ChromaDB vector store instance."""
-    embeddings = OpenAIEmbeddings(
-        model="text-embedding-3-small",
-        api_key=settings.openai_api_key,
-    )
     return Chroma(
         collection_name="llm_pipeline",
-        embedding_function=embeddings,
+        embedding_function=get_embeddings(),
         persist_directory=settings.chroma_persist_dir,
     )
 
