@@ -1,23 +1,23 @@
 """Top-level investigation cycle graph.
 
 Flow:
-    START → orchestrator_plan → run_investigations → orchestrator_evaluate
-      → [synthesize] → orchestrator_checkpoint → END (interrupt for human review)
+    START → orchestrator_plan → [fan-out] investigate_topic → orchestrator_evaluate
+      → [_route_after_evaluate] → "synthesize" OR [fan-out] investigate_topic (LOOP)
+    synthesize → orchestrator_checkpoint → END (interrupt for human review)
 """
 
 from __future__ import annotations
 
 import logging
 
-from langgraph.constants import Send
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
 
 from llm_pipeline.agents.investigator import build_investigator_graph
 from llm_pipeline.agents.orchestrator import (
     orchestrator_checkpoint,
     orchestrator_evaluate,
     orchestrator_plan,
-    should_continue_or_synthesize,
 )
 from llm_pipeline.agents.state import InvestigationCycleState, InvestigatorState
 
@@ -56,6 +56,64 @@ def _route_investigations(state: InvestigationCycleState) -> list[Send]:
                     "findings": [],
                     "hypotheses": [],
                     "digest_lines": [],
+                    "prior_context": "",
+                },
+            )
+        )
+    return sends
+
+
+def _build_prior_context(state: InvestigationCycleState) -> str:
+    """Build a plain-text summary of prior findings for follow-up investigators."""
+    findings = state.get("prior_findings", [])
+    hypotheses = state.get("prior_hypotheses", [])
+
+    if not findings and not hypotheses:
+        return ""
+
+    lines = []
+    if findings:
+        lines.append("Previous findings:")
+        for f in findings:
+            lines.append(f"  [{f.status.value}] {f.statement}")
+            if f.evidence:
+                for e in f.evidence[:2]:
+                    lines.append(f"    - {e}")
+
+    if hypotheses:
+        lines.append("Untested hypotheses from prior rounds:")
+        for h in hypotheses:
+            lines.append(f"  - {h.statement} ({h.reasoning})")
+
+    return "\n".join(lines)
+
+
+def _route_after_evaluate(
+    state: InvestigationCycleState,
+) -> str | list[Send]:
+    """Route after evaluation: synthesize if done, or fan-out for more investigation."""
+    topics = state.get("investigation_plan", [])
+
+    if not topics:
+        return "synthesize"
+
+    # Build prior context for follow-up investigators
+    prior_context = _build_prior_context(state)
+    run_id = state.get("run_id", "")
+
+    sends = []
+    for topic in topics:
+        sends.append(
+            Send(
+                "investigate_topic",
+                {
+                    "topic": topic,
+                    "run_id": run_id,
+                    "messages": [],
+                    "findings": [],
+                    "hypotheses": [],
+                    "digest_lines": [],
+                    "prior_context": prior_context,
                 },
             )
         )
@@ -90,7 +148,7 @@ def build_investigation_graph():
     graph.add_edge("investigate_topic", "orchestrator_evaluate")
     graph.add_conditional_edges(
         "orchestrator_evaluate",
-        should_continue_or_synthesize,
+        _route_after_evaluate,
         {"synthesize": "synthesize"},
     )
     graph.add_edge("synthesize", "orchestrator_checkpoint")

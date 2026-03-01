@@ -207,6 +207,126 @@ def get_ml_report_summary(run_id: str) -> str:
     return json.dumps(summary, indent=2)
 
 
+@tool
+def get_data_completeness(
+    run_id: str,
+    dimension: str | None = None,
+    dimension_value: str | None = None,
+    field_name: str | None = None,
+    limit: int = 50,
+) -> str:
+    """Retrieve data completeness metrics from an ML analysis run.
+
+    Shows zero-value rates per field — use this to check if a metric is
+    trustworthy before drawing conclusions from it.
+
+    Args:
+        run_id: The analysis run to query.
+        dimension: Filter by dimension (e.g. "listid", "recipient_domain").
+        dimension_value: Filter by specific dimension value.
+        field_name: Filter by field name (e.g. "clicktrackingid", "injected_time").
+        limit: Max rows to return.
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from llm_pipeline.email_analytics.models import DataCompletenessRecord
+    from llm_pipeline.email_analytics.storage import get_engine
+
+    engine = get_engine()
+    with Session(engine) as session:
+        stmt = select(DataCompletenessRecord).where(
+            DataCompletenessRecord.run_id == run_id
+        )
+        if dimension:
+            stmt = stmt.where(DataCompletenessRecord.dimension == dimension)
+        if dimension_value:
+            stmt = stmt.where(DataCompletenessRecord.dimension_value == dimension_value)
+        if field_name:
+            stmt = stmt.where(DataCompletenessRecord.field_name == field_name)
+        stmt = stmt.limit(limit)
+        rows = session.execute(stmt).scalars().all()
+
+    if not rows:
+        return f"No data completeness records found for run_id={run_id}"
+
+    results = []
+    for r in rows:
+        results.append({
+            "time_window": r.time_window.isoformat(),
+            "dimension": r.dimension,
+            "dimension_value": r.dimension_value,
+            "field_name": r.field_name,
+            "total_records": r.total_records,
+            "zero_count": r.zero_count,
+            "zero_rate": round(r.zero_rate, 4),
+        })
+    return json.dumps(results, indent=2)
+
+
+@tool
+def compare_dimensions(
+    run_id: str,
+    dimension: str,
+    values: list[str],
+    metric: str = "delivery_rate",
+) -> str:
+    """Compare a metric across multiple dimension values side-by-side.
+
+    Useful for comparing performance between segments, domains, etc.
+
+    Args:
+        run_id: The analysis run to query.
+        dimension: The dimension to compare across (e.g. "listid").
+        values: List of dimension values to compare (e.g. ["VH", "H", "M"]).
+        metric: The metric to compare (default "delivery_rate"). Also supports
+                "bounce_rate", "deferral_rate", "complaint_rate".
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from llm_pipeline.email_analytics.models import AggregationRecord
+    from llm_pipeline.email_analytics.storage import get_engine
+
+    valid_metrics = {
+        "delivery_rate", "bounce_rate", "deferral_rate", "complaint_rate",
+    }
+    if metric not in valid_metrics:
+        return f"Invalid metric '{metric}'. Must be one of: {', '.join(sorted(valid_metrics))}"
+
+    engine = get_engine()
+    with Session(engine) as session:
+        stmt = (
+            select(AggregationRecord)
+            .where(AggregationRecord.run_id == run_id)
+            .where(AggregationRecord.dimension == dimension)
+            .where(AggregationRecord.dimension_value.in_(values))
+        )
+        rows = session.execute(stmt).scalars().all()
+
+    if not rows:
+        return f"No aggregation data found for run_id={run_id}, dimension={dimension}"
+
+    result: dict[str, list[dict]] = {}
+    for r in rows:
+        val = r.dimension_value
+        if val not in result:
+            result[val] = []
+        result[val].append({
+            "time_window": r.time_window.isoformat(),
+            metric: round(getattr(r, metric), 4),
+            "total": r.total,
+        })
+    return json.dumps(result, indent=2)
+
+
 # Tool registries per agent role
 ORCHESTRATOR_ML_TOOLS = [get_ml_report_summary, get_anomalies, get_trends]
-INVESTIGATOR_ML_TOOLS = [get_aggregations, get_anomalies, get_trends, get_ml_report_summary]
+INVESTIGATOR_ML_TOOLS = [
+    get_aggregations,
+    get_anomalies,
+    get_trends,
+    get_ml_report_summary,
+    get_data_completeness,
+    compare_dimensions,
+]

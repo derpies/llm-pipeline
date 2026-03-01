@@ -86,8 +86,13 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
 
 
 def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
-    """Evaluate results from investigators, decide whether to continue."""
+    """Evaluate results from investigators, decide whether to continue.
+
+    Uses LLM to assess findings and generate follow-up topics if needed.
+    Respects circuit breaker budget — stops iteration when limits exceeded.
+    """
     findings = state.get("findings", [])
+    hypotheses = state.get("hypotheses", [])
     iteration_count = state.get("iteration_count", 0) + 1
     started_at = state.get("started_at", datetime.now(UTC))
     budget = state.get("budget", CircuitBreakerBudget())
@@ -100,35 +105,85 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
 
     digest_lines = [
         f"[eval] Iteration {iteration_count}: "
-        f"{len(findings)} findings so far, "
+        f"{len(findings)} findings, {len(hypotheses)} hypotheses, "
         f"{budget_check['elapsed_seconds']}s elapsed"
     ]
 
+    # If budget exceeded, stop iteration
     if budget_check["exceeded"]:
         reasons = ", ".join(budget_check["reasons"])
         digest_lines.append(f"[circuit_breaker] Budget exceeded: {reasons}")
+        return {
+            "iteration_count": iteration_count,
+            "investigation_plan": [],
+            "prior_findings": findings,
+            "prior_hypotheses": hypotheses,
+            "digest_lines": digest_lines,
+        }
+
+    # Check if all findings are resolved (no INCONCLUSIVE, no untested hypotheses)
+    has_inconclusive = any(f.status.value == "inconclusive" for f in findings)
+    has_hypotheses = len(hypotheses) > 0
+
+    if not has_inconclusive and not has_hypotheses:
+        digest_lines.append("[eval] All findings resolved, no untested hypotheses — stopping")
+        return {
+            "iteration_count": iteration_count,
+            "investigation_plan": [],
+            "prior_findings": findings,
+            "prior_hypotheses": hypotheses,
+            "digest_lines": digest_lines,
+        }
+
+    # Ask the LLM if follow-up investigation is warranted
+    findings_summary = []
+    for f in findings:
+        line = f"[{f.status.value}] {f.statement}"
+        if f.evidence:
+            line += f" (evidence: {'; '.join(f.evidence[:2])})"
+        findings_summary.append(line)
+
+    hypotheses_summary = [f"[untested] {h.statement} — {h.reasoning}" for h in hypotheses]
+
+    findings_block = "\n".join(findings_summary)
+    hypotheses_block = "\n".join(hypotheses_summary) or "(none)"
+    eval_prompt = (
+        f"You are evaluating investigation results after iteration {iteration_count}.\n\n"
+        f"Findings so far:\n{findings_block}\n\n"
+        f"Untested hypotheses:\n{hypotheses_block}\n\n"
+        "Should we investigate further? If yes, create 1-2 focused follow-up topics "
+        "to test untested hypotheses or resolve inconclusive findings.\n"
+        "If the findings are sufficient, respond with an empty JSON array [].\n"
+        "Respond with ONLY a JSON array of investigation topic objects "
+        "(fields: title, dimension, dimension_value, metrics, question, priority, context), "
+        "or an empty array []."
+    )
+
+    try:
+        llm = get_llm(role="orchestrator")
+        response = llm.invoke([
+            SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
+            HumanMessage(content=eval_prompt),
+        ])
+        follow_up_topics = _parse_topics(response.content)
+    except Exception as e:
+        logger.warning("Failed to get follow-up evaluation: %s", e)
+        follow_up_topics = []
+
+    if follow_up_topics:
+        digest_lines.append(
+            f"[eval] Generated {len(follow_up_topics)} follow-up topics"
+        )
+    else:
+        digest_lines.append("[eval] No follow-up needed — moving to synthesis")
 
     return {
         "iteration_count": iteration_count,
+        "investigation_plan": follow_up_topics,
+        "prior_findings": findings,
+        "prior_hypotheses": hypotheses,
         "digest_lines": digest_lines,
     }
-
-
-def should_continue_or_synthesize(state: InvestigationCycleState) -> str:
-    """Route: continue investigating or move to synthesis."""
-    budget = state.get("budget", CircuitBreakerBudget())
-    started_at = state.get("started_at", datetime.now(UTC))
-    iteration_count = state.get("iteration_count", 0)
-
-    budget_check = check_budget_exceeded(
-        iteration_count=iteration_count,
-        started_at_ts=started_at.timestamp(),
-        budget=budget,
-    )
-
-    if budget_check["exceeded"]:
-        return "synthesize"
-    return "synthesize"  # For Phase A, always go to synthesis after one round
 
 
 def orchestrator_checkpoint(state: InvestigationCycleState) -> dict:
@@ -143,19 +198,33 @@ def orchestrator_checkpoint(state: InvestigationCycleState) -> dict:
     sections.append(f"Findings: {len(findings)}")
     sections.append(f"Hypotheses: {len(hypotheses)}\n")
 
+    # Group findings by status
     if findings:
-        sections.append("## Findings")
+        by_status: dict[str, list] = {}
         for f in findings:
-            sections.append(f"- [{f.status.value}] {f.statement}")
-            if f.evidence:
-                for e in f.evidence[:3]:
-                    sections.append(f"  - {e}")
-        sections.append("")
+            by_status.setdefault(f.status.value, []).append(f)
+
+        for status_label in ["confirmed", "disproven", "inconclusive"]:
+            group = by_status.get(status_label, [])
+            if not group:
+                continue
+            sections.append(f"## Findings — {status_label.upper()}")
+            for f in group:
+                sections.append(f"- {f.statement}")
+                if f.evidence:
+                    for e in f.evidence[:3]:
+                        sections.append(f"  evidence: {e}")
+                if f.metrics_cited:
+                    metrics_str = ", ".join(f"{k}={v}" for k, v in f.metrics_cited.items())
+                    sections.append(f"  metrics: {metrics_str}")
+            sections.append("")
 
     if hypotheses:
         sections.append("## Hypotheses (untested)")
         for h in hypotheses:
             sections.append(f"- {h.statement}")
+            if h.reasoning:
+                sections.append(f"  reasoning: {h.reasoning}")
         sections.append("")
 
     sections.append("## Investigation Log")

@@ -41,6 +41,10 @@ class InvestigationCycleState(TypedDict, total=False):
     started_at: datetime
     budget: CircuitBreakerBudget
 
+    # Iteration context (passed to next round's investigators)
+    prior_findings: list[Finding]
+    prior_hypotheses: list[Hypothesis]
+
     # Output
     documents: Annotated[list[GeneratedDocument], operator.add]
     strategies: Annotated[list[AnalyticalStrategy], operator.add]
@@ -58,6 +62,7 @@ class InvestigatorState(MessagesState):
     # Input from orchestrator
     topic: InvestigationTopic
     run_id: str
+    prior_context: str  # Summary of prior findings for follow-up rounds
 
     # Output (flows back to parent via fan-in)
     hypotheses: Annotated[list[Hypothesis], operator.add]

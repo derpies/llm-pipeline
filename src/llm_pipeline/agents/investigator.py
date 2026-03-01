@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -13,11 +14,12 @@ from llm_pipeline.agents.state import InvestigatorState
 from llm_pipeline.models.llm import get_llm
 from llm_pipeline.tools.common import get_current_datetime
 from llm_pipeline.tools.ml import INVESTIGATOR_ML_TOOLS
+from llm_pipeline.tools.reporting import REPORTING_TOOLS
 
 logger = logging.getLogger(__name__)
 
 # Tools available to the investigator
-INVESTIGATOR_TOOLS = [get_current_datetime] + INVESTIGATOR_ML_TOOLS
+INVESTIGATOR_TOOLS = [get_current_datetime] + INVESTIGATOR_ML_TOOLS + REPORTING_TOOLS
 
 
 def _should_continue(state: InvestigatorState) -> str:
@@ -37,17 +39,27 @@ def _call_investigator(state: InvestigatorState) -> dict:
         len(state["messages"]) == 1 and isinstance(state["messages"][0], HumanMessage)
     ):
         topic = state["topic"]
-        brief = (
-            f"Investigate: {topic.title}\n"
-            f"Dimension: {topic.dimension}={topic.dimension_value}\n"
-            f"Metrics of interest: {', '.join(topic.metrics)}\n"
-            f"Question: {topic.question}\n"
-            f"Context: {topic.context}\n"
-            f"Run ID: {state['run_id']}\n\n"
-            f"Use the ML tools to examine the data. Form a hypothesis, test it, "
-            f"and report your finding. When done, provide your final assessment "
-            f"without calling any more tools."
+        brief_parts = [
+            f"Investigate: {topic.title}",
+            f"Dimension: {topic.dimension}={topic.dimension_value}",
+            f"Metrics of interest: {', '.join(topic.metrics)}",
+            f"Question: {topic.question}",
+            f"Context: {topic.context}",
+            f"Run ID: {state['run_id']}",
+        ]
+
+        # Inject prior context for follow-up rounds
+        prior_context = state.get("prior_context", "")
+        if prior_context:
+            brief_parts.append(f"\n--- Prior findings from earlier rounds ---\n{prior_context}")
+
+        brief_parts.append(
+            "\nUse the ML tools to examine the data. Form a hypothesis, test it, "
+            "and report your findings using report_finding and report_hypothesis tools. "
+            "You MUST call report_finding at least once before finishing."
         )
+        brief = "\n".join(brief_parts)
+
         messages = [
             SystemMessage(content=INVESTIGATOR_SYSTEM_PROMPT),
             HumanMessage(content=brief),
@@ -60,30 +72,105 @@ def _call_investigator(state: InvestigatorState) -> dict:
 
 
 def _extract_results(state: InvestigatorState) -> dict:
-    """Extract findings from the investigator's final message."""
+    """Extract findings from reporting tool calls in the message history.
+
+    Scans all messages for report_finding and report_hypothesis tool calls,
+    parses their arguments into Finding/Hypothesis objects. Falls back to
+    creating an INCONCLUSIVE finding from the final message if no reporting
+    tools were called.
+    """
     from datetime import UTC, datetime
 
-    from llm_pipeline.agents.models import Finding, FindingStatus
+    from llm_pipeline.agents.models import Finding, FindingStatus, Hypothesis
 
     topic = state["topic"]
-    last_message = state["messages"][-1]
-    content = last_message.content if hasattr(last_message, "content") else str(last_message)
+    run_id = state.get("run_id", "")
+    now = datetime.now(UTC)
 
-    # For Phase A, create a finding from the final message content
-    finding = Finding(
-        topic_title=topic.title,
-        statement=content[:500] if len(content) > 500 else content,
-        status=FindingStatus.INCONCLUSIVE,
-        evidence=[],
-        created_at=datetime.now(UTC),
-        run_id=state.get("run_id", ""),
-    )
+    findings: list[Finding] = []
+    hypotheses: list[Hypothesis] = []
+    digest_lines: list[str] = []
 
-    digest = f"[investigate] {topic.title}: {finding.status.value}"
+    # Scan all messages for reporting tool calls
+    for msg in state["messages"]:
+        if not hasattr(msg, "tool_calls") or not msg.tool_calls:
+            continue
+        for tc in msg.tool_calls:
+            name = tc.get("name", "")
+            args = tc.get("args", {})
+
+            if name == "report_finding":
+                # Parse metrics_cited — could be JSON string or dict
+                metrics_cited = args.get("metrics_cited", "{}")
+                if isinstance(metrics_cited, str):
+                    try:
+                        metrics_cited = json.loads(metrics_cited)
+                    except (json.JSONDecodeError, TypeError):
+                        metrics_cited = {}
+                if not isinstance(metrics_cited, dict):
+                    metrics_cited = {}
+
+                # Parse evidence — could be JSON string or list
+                evidence = args.get("evidence", "[]")
+                if isinstance(evidence, str):
+                    try:
+                        evidence = json.loads(evidence)
+                    except (json.JSONDecodeError, TypeError):
+                        evidence = [evidence] if evidence else []
+                if not isinstance(evidence, list):
+                    evidence = [str(evidence)]
+
+                # Parse status
+                status_str = args.get("status", "inconclusive")
+                try:
+                    status = FindingStatus(status_str)
+                except ValueError:
+                    status = FindingStatus.INCONCLUSIVE
+
+                finding = Finding(
+                    topic_title=topic.title,
+                    statement=args.get("statement", ""),
+                    status=status,
+                    evidence=evidence,
+                    metrics_cited=metrics_cited,
+                    created_at=now,
+                    run_id=run_id,
+                )
+                findings.append(finding)
+                digest_lines.append(
+                    f"[finding:{status.value}] {finding.statement}"
+                )
+
+            elif name == "report_hypothesis":
+                hypothesis = Hypothesis(
+                    topic_title=topic.title,
+                    statement=args.get("statement", ""),
+                    reasoning=args.get("reasoning", ""),
+                    created_at=now,
+                    run_id=run_id,
+                )
+                hypotheses.append(hypothesis)
+                digest_lines.append(f"[hypothesis] {hypothesis.statement}")
+
+    # Fallback: no reporting tools were called — create INCONCLUSIVE from final message
+    if not findings:
+        last_message = state["messages"][-1]
+        content = last_message.content if hasattr(last_message, "content") else str(last_message)
+        finding = Finding(
+            topic_title=topic.title,
+            statement=content[:500] if len(content) > 500 else content,
+            status=FindingStatus.INCONCLUSIVE,
+            evidence=[],
+            created_at=now,
+            run_id=run_id,
+        )
+        findings.append(finding)
+        digest_lines.append(f"[finding:inconclusive] {topic.title}: no reporting tools called")
 
     return {
-        "findings": [finding],
-        "digest_lines": [digest],
+        "findings": findings,
+        "hypotheses": hypotheses,
+        "digest_lines": digest_lines,
     }
 
 
