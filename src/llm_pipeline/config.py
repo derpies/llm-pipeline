@@ -34,8 +34,9 @@ class Settings(BaseSettings):
     embedding_provider: str = "huggingface"  # "huggingface" or "openai"
     embedding_model: str = ""  # empty = provider default
 
-    # ChromaDB
-    chroma_persist_dir: str = "/data/chroma"
+    # Weaviate
+    weaviate_url: str = "http://weaviate:8080"
+    weaviate_grpc_url: str = "weaviate:50051"
 
     # Ingestion
     chunk_size: int = 1000

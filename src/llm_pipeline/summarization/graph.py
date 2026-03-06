@@ -252,7 +252,7 @@ def _generate_dimensional_summaries(state: SummarizationState) -> dict:
 
 
 def _embed_documents(state: SummarizationState) -> dict:
-    """Store generated documents in ChromaDB and build the result."""
+    """Store generated documents in Weaviate and build the result."""
     from llm_pipeline.summarization.embed import store_documents
 
     docs = state.get("documents", [])

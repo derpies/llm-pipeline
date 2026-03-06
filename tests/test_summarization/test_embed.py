@@ -73,13 +73,14 @@ class TestDocumentsToLangchain:
 
 
 class TestStoreDocuments:
-    def test_calls_vectorstore(self):
+    @patch("llm_pipeline.rag.ingest.WeaviateVectorStore")
+    def test_calls_vectorstore(self, mock_wvs_class):
         """store_documents should convert and add to vectorstore."""
-        doc = _make_doc()
         mock_vs = MagicMock()
+        mock_wvs_class.return_value = mock_vs
 
-        with patch("llm_pipeline.rag.ingest.get_vectorstore", return_value=mock_vs):
-            count = store_documents([doc])
+        doc = _make_doc()
+        count = store_documents([doc])
 
         assert count == 1
         mock_vs.add_documents.assert_called_once()

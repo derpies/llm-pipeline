@@ -1,4 +1,4 @@
-"""Store generated documents in ChromaDB via existing RAG infrastructure."""
+"""Store generated documents in Weaviate via the RAG infrastructure."""
 
 from __future__ import annotations
 
@@ -43,17 +43,18 @@ def documents_to_langchain(docs: list[GeneratedDocument]) -> list[Document]:
 
 
 def store_documents(docs: list[GeneratedDocument]) -> int:
-    """Convert and store generated documents in ChromaDB.
+    """Convert and store generated documents in Weaviate.
 
     Returns the number of chunks stored.
     """
-    from llm_pipeline.rag.ingest import get_vectorstore
+    from llm_pipeline.knowledge.weaviate_schema import SUMMARIZATION_COLLECTION
+    from llm_pipeline.rag.ingest import WeaviateVectorStore
 
     lc_docs = documents_to_langchain(docs)
     if not lc_docs:
         return 0
 
-    vectorstore = get_vectorstore()
+    vectorstore = WeaviateVectorStore(SUMMARIZATION_COLLECTION)
     vectorstore.add_documents(lc_docs)
     logger.info("Stored %d chunks from %d generated documents", len(lc_docs), len(docs))
     return len(lc_docs)

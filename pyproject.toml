@@ -10,8 +10,6 @@ dependencies = [
     "langchain-community>=0.3",
     "langchain-text-splitters>=0.3",
     "langgraph>=0.2",
-    "chromadb>=0.5",
-    "langchain-chroma>=0.2",
     "pypdf>=4.0",
     "pydantic-settings>=2.0",
     "typer[all]>=0.12",
@@ -22,6 +20,7 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "langchain-huggingface>=1.2.0",
     "sentence-transformers>=5.2.3",
+    "weaviate-client>=4.9",
 ]
 
 [project.scripts]

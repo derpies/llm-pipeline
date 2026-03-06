@@ -30,7 +30,7 @@ class GeneratedDocument(BaseModel):
     generated_at: datetime
 
     def to_metadata(self) -> dict:
-        """Flat dict suitable for ChromaDB metadata storage."""
+        """Flat dict suitable for vector store metadata storage."""
         meta: dict = {
             "document_type": self.document_type.value,
             "run_id": self.run_id,

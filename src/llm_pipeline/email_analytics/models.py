@@ -412,3 +412,52 @@ class AnalysisRunRecord(Base):
     anomaly_count: Mapped[int] = mapped_column(Integer, default=0)
     trend_count: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[str] = mapped_column(Text, default="")
+
+
+# ---------------------------------------------------------------------------
+# Investigation persistence
+# ---------------------------------------------------------------------------
+
+
+class InvestigationRunRecord(Base):
+    __tablename__ = "investigation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    iteration_count: Mapped[int] = mapped_column(Integer, default=0)
+    finding_count: Mapped[int] = mapped_column(Integer, default=0)
+    hypothesis_count: Mapped[int] = mapped_column(Integer, default=0)
+    checkpoint_digest: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class InvestigationFindingRecord(Base):
+    __tablename__ = "investigation_findings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    topic_title: Mapped[str] = mapped_column(String(256))
+    statement: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32))
+    evidence: Mapped[str] = mapped_column(Text, default="[]")
+    metrics_cited: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class InvestigationHypothesisRecord(Base):
+    __tablename__ = "investigation_hypotheses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    topic_title: Mapped[str] = mapped_column(String(256))
+    statement: Mapped[str] = mapped_column(Text)
+    reasoning: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

@@ -5,7 +5,7 @@ volumes:
   llmpipe-pgdata:
   llmpipe-redisdata:
   llmpipe-uv-cache:
-  llmpipe-chroma:
+  llmpipe-weaviate:
 
 services:
   app:
@@ -14,7 +14,6 @@ services:
     volumes:
       - .:/app
       - llmpipe-uv-cache:/root/.cache/uv
-      - llmpipe-chroma:/data/chroma
       - ./raw-logs:/data/raw-logs:ro
       - ./output:/data/output
     env_file:
@@ -25,6 +24,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      weaviate:
         condition: service_healthy
     stdin_open: true
     tty: true
@@ -50,6 +51,29 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - llmpipe-net
+
+  weaviate:
+    container_name: llmpipe-weaviate
+    image: cr.weaviate.io/semitechnologies/weaviate:1.28.4
+    ports:
+      - "20003:8080"
+      - "20004:50051"
+    volumes:
+      - llmpipe-weaviate:/var/lib/weaviate
+    environment:
+      QUERY_DEFAULTS_LIMIT: 25
+      AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: "true"
+      PERSISTENCE_DATA_PATH: "/var/lib/weaviate"
+      DEFAULT_VECTORIZER_MODULE: "none"
+      CLUSTER_HOSTNAME: "node1"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/v1/.well-known/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     networks:
       - llmpipe-net
 

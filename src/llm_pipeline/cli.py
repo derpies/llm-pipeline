@@ -228,6 +228,43 @@ def investigate(
     else:
         typer.echo("\nInvestigation complete (no digest produced).")
 
+    # Persist results
+    from llm_pipeline.agents.storage import store_investigation_results
+
+    findings = result.get("findings", [])
+    hypotheses = result.get("hypotheses", [])
+    try:
+        store_investigation_results(
+            run_id=report.run_id,
+            findings=findings,
+            hypotheses=hypotheses,
+            checkpoint_digest=digest,
+            iteration_count=result.get("iteration_count", 0),
+            started_at=result.get("started_at", report.started_at),
+            completed_at=result.get("completed_at"),
+        )
+        typer.echo(
+            f"\nPersisted: {len(findings)} findings, {len(hypotheses)} hypotheses"
+        )
+    except Exception as e:
+        typer.echo(f"\nWarning: failed to persist results: {e}")
+
+    # Store to knowledge hierarchy
+    try:
+        from llm_pipeline.knowledge.store import store_investigation_to_knowledge
+
+        counts = store_investigation_to_knowledge(
+            findings=findings,
+            hypotheses=hypotheses,
+            run_id=report.run_id,
+        )
+        typer.echo(
+            f"Knowledge store: {counts['stored']} entries stored, "
+            f"{counts['merged']} merged"
+        )
+    except Exception as e:
+        typer.echo(f"Warning: failed to store to knowledge hierarchy: {e}")
+
 
 @app.command()
 def summarize(
@@ -268,6 +305,76 @@ def _run_summarization(report) -> None:
                 typer.echo(f"    - {err}")
     else:
         typer.echo("Summarization produced no result.")
+
+
+@app.command()
+def knowledge(
+    query: Annotated[str, typer.Argument(help="Search query for the knowledge store")],
+    scope: Annotated[
+        str, typer.Option("--scope", "-s", help="Scope: 'community' or 'account'")
+    ] = "community",
+    account_id: Annotated[
+        str, typer.Option("--account-id", "-a", help="Account ID (required for account scope)")
+    ] = "",
+    top_k: Annotated[int, typer.Option("--top-k", "-k", help="Number of results")] = 10,
+) -> None:
+    """Search the knowledge store for findings, hypotheses, and truths."""
+    setup_logging()
+
+    from llm_pipeline.knowledge.models import KnowledgeScope
+    from llm_pipeline.knowledge.retrieval import retrieve_knowledge
+
+    scope_enum = KnowledgeScope.ACCOUNT if scope == "account" else KnowledgeScope.COMMUNITY
+    results = retrieve_knowledge(
+        query=query, scope=scope_enum, account_id=account_id, top_k=top_k,
+    )
+
+    if not results:
+        typer.echo("No results found.")
+        raise typer.Exit()
+
+    for i, r in enumerate(results, 1):
+        tier = r.tier.value.upper()
+        conf = f"{r.confidence:.0%}"
+        status = f" [{r.finding_status}]" if r.finding_status else ""
+        topic = f" ({r.topic})" if r.topic else ""
+        typer.echo(
+            f"[{i}] {tier}{status} confidence={conf}{topic} "
+            f"score={r.weighted_score:.3f} obs={r.observation_count}"
+        )
+        typer.echo(f"    {r.statement}")
+        typer.echo()
+
+
+@app.command()
+def knowledge_stats() -> None:
+    """Show entry counts by tier, scope, and status in the knowledge store."""
+    setup_logging()
+
+    from llm_pipeline.knowledge.models import KnowledgeTier
+    from llm_pipeline.knowledge.weaviate_schema import TIER_COLLECTIONS
+
+    try:
+        from llm_pipeline.knowledge.store import get_weaviate_client
+
+        client = get_weaviate_client()
+    except Exception as e:
+        typer.echo(f"Cannot connect to Weaviate: {e}")
+        raise typer.Exit(1)
+
+    for tier in KnowledgeTier:
+        collection_name = TIER_COLLECTIONS[tier]
+        try:
+            collection = client.collections.get(collection_name)
+            tenants = collection.tenants.get()
+            total = 0
+            for tenant_name in tenants:
+                tenant_coll = collection.with_tenant(tenant_name)
+                agg = tenant_coll.aggregate.over_all(total_count=True)
+                total += agg.total_count or 0
+            typer.echo(f"  {tier.value:12s}: {total:5d} entries across {len(tenants)} tenants")
+        except Exception as e:
+            typer.echo(f"  {tier.value:12s}: error ({e})")
 
 
 if __name__ == "__main__":
