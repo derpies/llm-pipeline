@@ -41,6 +41,10 @@ class InvestigationCycleState(TypedDict, total=False):
     started_at: datetime
     budget: CircuitBreakerBudget
 
+    # Error tracking
+    evaluation_error: bool
+    topic_errors: Annotated[list[str], operator.add]
+
     # Iteration context (passed to next round's investigators)
     prior_findings: list[Finding]
     prior_hypotheses: list[Hypothesis]

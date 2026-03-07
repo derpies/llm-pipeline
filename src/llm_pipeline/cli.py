@@ -270,6 +270,17 @@ def investigate(
     started_at = result.get("started_at", report.started_at)
     completed_at = result.get("completed_at")
     iteration_count = result.get("iteration_count", 0)
+
+    # Compute run status
+    if dry_run:
+        run_status = "dry_run"
+    elif findings and all(f.tool_use_failed for f in findings):
+        run_status = "failed"
+    elif any(f.tool_use_failed for f in findings):
+        run_status = "partial"
+    else:
+        run_status = "success"
+
     try:
         store_investigation_results(
             run_id=report.run_id,
@@ -280,9 +291,13 @@ def investigate(
             started_at=started_at,
             completed_at=completed_at,
             label=label,
+            status=run_status,
+            is_dry_run=dry_run,
+            ml_run_id=report.run_id,
         )
         typer.echo(
-            f"\nPersisted: {len(findings)} findings, {len(hypotheses)} hypotheses"
+            f"\nPersisted [{run_status}]: {len(findings)} findings, "
+            f"{len(hypotheses)} hypotheses"
         )
     except Exception as e:
         typer.echo(f"\nWarning: failed to persist results: {e}")
@@ -299,6 +314,8 @@ def investigate(
             completed_at=completed_at,
             label=label,
             spend_summary=get_tracker().summary(),
+            status=run_status,
+            is_dry_run=dry_run,
         )
         typer.echo(f"Report: {md_path}")
     except Exception as e:
@@ -554,6 +571,28 @@ def _format_comparison(a: dict, b: dict) -> str:
 
     lines: list[str] = []
 
+    # --- Warnings about comparability ---
+    warnings: list[str] = []
+    if a.get("is_dry_run") or b.get("is_dry_run"):
+        warnings.append("WARNING: one or both runs are dry-runs")
+    if a.get("status") in ("failed", "partial") or b.get("status") in ("failed", "partial"):
+        warnings.append(
+            f"WARNING: one or both runs have issues "
+            f"(A={a.get('status', 'unknown')}, B={b.get('status', 'unknown')})"
+        )
+    a_ml = a.get("ml_run_id")
+    b_ml = b.get("ml_run_id")
+    if a_ml and b_ml and a_ml != b_ml:
+        warnings.append(f"WARNING: runs used different ML reports (A={a_ml}, B={b_ml})")
+
+    if warnings:
+        lines.append("!" * 60)
+        lines.append("WARNINGS")
+        lines.append("!" * 60)
+        for w in warnings:
+            lines.append(f"  {w}")
+        lines.append("")
+
     # --- Metadata ---
     lines.append("=" * 60)
     lines.append("INVESTIGATION RUN COMPARISON")
@@ -561,9 +600,10 @@ def _format_comparison(a: dict, b: dict) -> str:
 
     for label_key, run in [("A", a), ("B", b)]:
         run_label = run.get("label") or "(no label)"
+        run_status = run.get("status", "unknown")
         lines.append(
             f"  Run {label_key}: {run['run_id']}  label={run_label}  "
-            f"iterations={run['iteration_count']}"
+            f"status={run_status}  iterations={run['iteration_count']}"
         )
     lines.append("")
 

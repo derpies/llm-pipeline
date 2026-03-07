@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, computed_field, model_validator
-from sqlalchemy import DateTime, Enum, Float, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, Float, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # ---------------------------------------------------------------------------
@@ -419,6 +419,13 @@ class AnalysisRunRecord(Base):
 # ---------------------------------------------------------------------------
 
 
+class InvestigationRunStatus(enum.StrEnum):
+    SUCCESS = "success"
+    PARTIAL = "partial"
+    FAILED = "failed"
+    DRY_RUN = "dry_run"
+
+
 class InvestigationRunRecord(Base):
     __tablename__ = "investigation_runs"
 
@@ -431,6 +438,10 @@ class InvestigationRunRecord(Base):
     hypothesis_count: Mapped[int] = mapped_column(Integer, default=0)
     checkpoint_digest: Mapped[str] = mapped_column(Text, default="")
     label: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(32), default="success")
+    is_dry_run: Mapped[bool] = mapped_column(Boolean, default=False)
+    ml_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    quality_warnings: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -446,6 +457,8 @@ class InvestigationFindingRecord(Base):
     status: Mapped[str] = mapped_column(String(32))
     evidence: Mapped[str] = mapped_column(Text, default="[]")
     metrics_cited: Mapped[str] = mapped_column(Text, default="{}")
+    is_fallback: Mapped[bool] = mapped_column(Boolean, default=False)
+    quality_warnings: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -23,6 +23,38 @@ logger = logging.getLogger(__name__)
 OUTPUT_DIR = Path("output/investigations")
 
 
+def _safe_json_loads(value, default):
+    """Parse JSON string, returning default for non-string or invalid values."""
+    if not isinstance(value, str):
+        return default
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return default
+
+
+def validate_finding(f: Finding) -> list[str]:
+    """Return quality warnings for a finding (non-blocking)."""
+    warnings: list[str] = []
+    if not f.statement.strip():
+        warnings.append("empty_statement")
+    elif len(f.statement.strip()) < 10:
+        warnings.append("statement_too_short")
+    if f.status == FindingStatus.CONFIRMED and not f.evidence:
+        warnings.append("confirmed_without_evidence")
+    if f.tool_use_failed:
+        warnings.append("tool_use_failed")
+    return warnings
+
+
+def validate_hypothesis(h: Hypothesis) -> list[str]:
+    """Return quality warnings for a hypothesis (non-blocking)."""
+    warnings: list[str] = []
+    if not h.statement.strip():
+        warnings.append("empty_statement")
+    return warnings
+
+
 def store_investigation_results(
     run_id: str,
     findings: list[Finding],
@@ -32,9 +64,14 @@ def store_investigation_results(
     started_at: datetime,
     completed_at: datetime | None = None,
     label: str = "",
+    status: str = "success",
+    is_dry_run: bool = False,
+    ml_run_id: str | None = None,
+    quality_warnings: list[str] | None = None,
 ) -> None:
     """Persist investigation results to Postgres (atomic commit)."""
     engine = get_engine()
+    run_warnings = list(quality_warnings or [])
 
     with Session(engine) as session:
         run = InvestigationRunRecord(
@@ -46,10 +83,24 @@ def store_investigation_results(
             hypothesis_count=len(hypotheses),
             checkpoint_digest=checkpoint_digest,
             label=label,
+            status=status,
+            is_dry_run=is_dry_run,
+            ml_run_id=ml_run_id,
+            quality_warnings=json.dumps(run_warnings),
         )
         session.add(run)
 
         for f in findings:
+            finding_warnings = validate_finding(f)
+            if finding_warnings:
+                logger.warning(
+                    "Finding quality warnings for '%s': %s",
+                    f.topic_title, finding_warnings,
+                )
+                run_warnings.extend(
+                    f"{f.topic_title}: {w}" for w in finding_warnings
+                )
+
             session.add(
                 InvestigationFindingRecord(
                     run_id=run_id,
@@ -58,10 +109,22 @@ def store_investigation_results(
                     status=f.status.value,
                     evidence=json.dumps(f.evidence),
                     metrics_cited=json.dumps(f.metrics_cited),
+                    is_fallback=f.tool_use_failed,
+                    quality_warnings=json.dumps(finding_warnings),
                 )
             )
 
         for h in hypotheses:
+            hyp_warnings = validate_hypothesis(h)
+            if hyp_warnings:
+                logger.warning(
+                    "Hypothesis quality warnings for '%s': %s",
+                    h.topic_title, hyp_warnings,
+                )
+                run_warnings.extend(
+                    f"{h.topic_title}: {w}" for w in hyp_warnings
+                )
+
             session.add(
                 InvestigationHypothesisRecord(
                     run_id=run_id,
@@ -71,12 +134,17 @@ def store_investigation_results(
                 )
             )
 
+        # Update run-level warnings with aggregated finding/hypothesis warnings
+        run.quality_warnings = json.dumps(run_warnings)
+
         session.commit()
         logger.info(
-            "Stored investigation %s: %d findings, %d hypotheses",
+            "Stored investigation %s [%s]: %d findings, %d hypotheses, %d warnings",
             run_id,
+            status,
             len(findings),
             len(hypotheses),
+            len(run_warnings),
         )
 
 
@@ -162,6 +230,10 @@ def load_investigation(run_id: str, *, label: str | None = None) -> dict | None:
             "hypotheses": hypotheses,
             "checkpoint_digest": run.checkpoint_digest,
             "label": getattr(run, "label", ""),
+            "status": getattr(run, "status", "success"),
+            "is_dry_run": getattr(run, "is_dry_run", False),
+            "ml_run_id": getattr(run, "ml_run_id", None),
+            "quality_warnings": _safe_json_loads(getattr(run, "quality_warnings", "[]"), []),
         }
 
 
@@ -176,6 +248,8 @@ def write_investigation_markdown(
     label: str = "",
     spend_summary: str = "",
     output_dir: Path | None = None,
+    status: str = "success",
+    is_dry_run: bool = False,
 ) -> Path:
     """Write investigation results to a human-readable markdown file.
 
@@ -202,6 +276,9 @@ def write_investigation_markdown(
     if label:
         lines.append(f"**Label:** {label}")
     lines.append("")
+    lines.append(f"**Status:** {status.upper()}")
+    if is_dry_run:
+        lines.append("**Mode:** DRY RUN (no real LLM calls)")
     lines.append(f"**Started:** {started_at:%Y-%m-%d %H:%M:%S UTC}")
     lines.append(f"**Completed:** {completed:%Y-%m-%d %H:%M:%S UTC}")
     lines.append(f"**Duration:** {mins}m {secs}s")
@@ -232,7 +309,8 @@ def write_investigation_markdown(
         lines.append("")
 
         for f in group:
-            lines.append(f"### {f.topic_title}")
+            fallback_tag = " [FALLBACK]" if f.tool_use_failed else ""
+            lines.append(f"### {f.topic_title}{fallback_tag}")
             lines.append("")
             lines.append(f"> {f.statement}")
             lines.append("")
@@ -259,6 +337,19 @@ def write_investigation_markdown(
             if h.reasoning:
                 lines.append(f"**Reasoning:** {h.reasoning}")
                 lines.append("")
+
+    # Quality warnings
+    all_warnings = []
+    for f in findings:
+        all_warnings.extend(validate_finding(f))
+    for h in hypotheses:
+        all_warnings.extend(validate_hypothesis(h))
+    if all_warnings:
+        lines.append("## Quality Warnings")
+        lines.append("")
+        for w in all_warnings:
+            lines.append(f"- {w}")
+        lines.append("")
 
     # Checkpoint digest (raw)
     if checkpoint_digest:

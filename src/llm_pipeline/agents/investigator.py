@@ -121,12 +121,19 @@ def _extract_results(state: InvestigatorState) -> dict:
             args = tc.get("args", {})
 
             if name == "report_finding":
+                normalization_count = 0
+
                 # Parse metrics_cited — could be JSON string or dict
                 metrics_cited = args.get("metrics_cited", "{}")
                 if isinstance(metrics_cited, str):
                     try:
                         metrics_cited = json.loads(metrics_cited)
                     except (json.JSONDecodeError, TypeError):
+                        logger.warning(
+                            "[normalization] %s: metrics_cited is not valid JSON: %r",
+                            topic.title, metrics_cited,
+                        )
+                        normalization_count += 1
                         metrics_cited = {}
                 if not isinstance(metrics_cited, dict):
                     metrics_cited = {}
@@ -136,7 +143,11 @@ def _extract_results(state: InvestigatorState) -> dict:
                     try:
                         clean_metrics[k] = float(v)
                     except (ValueError, TypeError):
-                        pass
+                        logger.warning(
+                            "[normalization] %s: dropping non-numeric metric %s=%r",
+                            topic.title, k, v,
+                        )
+                        normalization_count += 1
                 metrics_cited = clean_metrics
 
                 # Parse evidence — could be JSON string or list
@@ -154,7 +165,17 @@ def _extract_results(state: InvestigatorState) -> dict:
                 try:
                     status = FindingStatus(status_str)
                 except ValueError:
+                    logger.warning(
+                        "[normalization] %s: invalid status %r, coercing to INCONCLUSIVE",
+                        topic.title, status_str,
+                    )
+                    normalization_count += 1
                     status = FindingStatus.INCONCLUSIVE
+
+                if normalization_count:
+                    digest_lines.append(
+                        f"[normalization] {topic.title}: {normalization_count} fields normalized"
+                    )
 
                 finding = Finding(
                     topic_title=topic.title,
@@ -183,6 +204,10 @@ def _extract_results(state: InvestigatorState) -> dict:
 
     # Fallback: no reporting tools were called — create INCONCLUSIVE from final message
     if not findings:
+        logger.warning(
+            "[normalization] %s: no reporting tools called — creating fallback finding",
+            topic.title,
+        )
         last_message = state["messages"][-1]
         content = last_message.content if hasattr(last_message, "content") else str(last_message)
         finding = Finding(

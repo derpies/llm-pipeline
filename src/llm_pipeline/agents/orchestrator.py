@@ -164,6 +164,7 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
         "or an empty array []."
     )
 
+    evaluation_error = False
     try:
         llm = get_llm(role="orchestrator")
         response = llm.invoke([
@@ -173,14 +174,16 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
         get_tracker().record(response, model=settings.model_orchestrator)
         follow_up_topics = _parse_topics(response.content)
     except Exception as e:
-        logger.warning("Failed to get follow-up evaluation: %s", e)
+        logger.error("Orchestrator evaluation failed: %s: %s", type(e).__name__, e)
+        digest_lines.append(f"[error] Orchestrator evaluation failed: {type(e).__name__}: {e}")
+        evaluation_error = True
         follow_up_topics = []
 
     if follow_up_topics:
         digest_lines.append(
             f"[eval] Generated {len(follow_up_topics)} follow-up topics"
         )
-    else:
+    elif not evaluation_error:
         digest_lines.append("[eval] No follow-up needed — moving to synthesis")
 
     return {
@@ -189,6 +192,7 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
         "prior_findings": findings,
         "prior_hypotheses": hypotheses,
         "digest_lines": digest_lines,
+        "evaluation_error": evaluation_error,
     }
 
 
@@ -232,6 +236,14 @@ def orchestrator_checkpoint(state: InvestigationCycleState) -> dict:
             sections.append(f"- {h.statement}")
             if h.reasoning:
                 sections.append(f"  reasoning: {h.reasoning}")
+        sections.append("")
+
+    # Surface errors prominently
+    error_lines = [line for line in digest_lines if line.startswith("[error]")]
+    if error_lines:
+        sections.append("## Errors")
+        for line in error_lines:
+            sections.append(f"- {line}")
         sections.append("")
 
     sections.append("## Investigation Log")

@@ -28,15 +28,44 @@ _investigator_graph = build_investigator_graph()
 
 
 def _investigate_topic(state: InvestigatorState) -> dict:
-    """Run a single investigator instance for one topic."""
-    result = _investigator_graph.invoke(state)
-    # Return only the fan-in fields
-    return {
-        "findings": result.get("findings", []),
-        "hypotheses": result.get("hypotheses", []),
-        "digest_lines": result.get("digest_lines", []),
-        "completed_topics": [state["topic"].title],
-    }
+    """Run a single investigator instance for one topic.
+
+    Catches exceptions to prevent one failed investigator from crashing
+    the entire fan-out.
+    """
+    from datetime import UTC, datetime
+
+    from llm_pipeline.agents.models import Finding, FindingStatus
+
+    topic = state["topic"]
+    try:
+        result = _investigator_graph.invoke(state)
+        return {
+            "findings": result.get("findings", []),
+            "hypotheses": result.get("hypotheses", []),
+            "digest_lines": result.get("digest_lines", []),
+            "completed_topics": [topic.title],
+            "topic_errors": [],
+        }
+    except Exception as e:
+        error_msg = f"{topic.title}: {type(e).__name__}: {e}"
+        logger.error("Investigator failed for topic '%s': %s", topic.title, e)
+        fallback = Finding(
+            topic_title=topic.title,
+            statement=f"Investigation failed: {type(e).__name__}: {e}",
+            status=FindingStatus.INCONCLUSIVE,
+            evidence=[],
+            created_at=datetime.now(UTC),
+            run_id=state.get("run_id", ""),
+            tool_use_failed=True,
+        )
+        return {
+            "findings": [fallback],
+            "hypotheses": [],
+            "digest_lines": [f"[error] Investigator crashed: {error_msg}"],
+            "completed_topics": [topic.title],
+            "topic_errors": [error_msg],
+        }
 
 
 def _route_investigations(state: InvestigationCycleState) -> list[Send]:
