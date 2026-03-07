@@ -533,6 +533,59 @@ def _update_property_by_entry_id(
 
 
 # ---------------------------------------------------------------------------
+# Quality filters — prevent junk from entering the knowledge store
+# ---------------------------------------------------------------------------
+
+# Phrases that indicate LLM meta-commentary, not analytical findings
+_META_COMMENTARY_PHRASES = [
+    "i need a run_id",
+    "could you please provide",
+    "i don't have",
+    "can you provide",
+    "please provide",
+    "i need the",
+    "could you provide",
+    "let me check",
+    "i would need",
+    "i'll need",
+]
+
+
+def _should_store_finding(finding) -> tuple[bool, str]:
+    """Check if a finding is worth storing. Returns (should_store, rejection_reason)."""
+    # Reject tool-use failures (fallback path — investigator never called ML tools)
+    if getattr(finding, "tool_use_failed", False):
+        return False, "tool_use_failed"
+
+    # Reject dry-run entries
+    if getattr(finding, "run_id", "") == "dry-run" or finding.statement.startswith("DRY_RUN:"):
+        return False, "dry_run"
+
+    # Reject LLM meta-commentary
+    statement_lower = finding.statement.lower()
+    for phrase in _META_COMMENTARY_PHRASES:
+        if phrase in statement_lower:
+            return False, f"meta_commentary: '{phrase}'"
+
+    return True, ""
+
+
+def _should_store_hypothesis(hypothesis) -> tuple[bool, str]:
+    """Check if a hypothesis is worth storing. Returns (should_store, rejection_reason)."""
+    # Reject dry-run entries
+    if getattr(hypothesis, "run_id", "") == "dry-run" or hypothesis.statement.startswith("DRY_RUN:"):
+        return False, "dry_run"
+
+    # Reject LLM meta-commentary
+    statement_lower = hypothesis.statement.lower()
+    for phrase in _META_COMMENTARY_PHRASES:
+        if phrase in statement_lower:
+            return False, f"meta_commentary: '{phrase}'"
+
+    return True, ""
+
+
+# ---------------------------------------------------------------------------
 # High-level: convert investigation results to knowledge entries
 # ---------------------------------------------------------------------------
 
@@ -547,13 +600,20 @@ def store_investigation_to_knowledge(
 ) -> dict[str, int]:
     """Convert investigation findings/hypotheses to knowledge entries and store.
 
-    Returns counts: {"stored": N, "merged": M}.
+    Returns counts: {"stored": N, "merged": M, "filtered": F}.
     """
     client = client or get_weaviate_client()
     stored = 0
     merged = 0
+    filtered = 0
 
     for f in findings:
+        should_store, reason = _should_store_finding(f)
+        if not should_store:
+            logger.info("Filtered finding from knowledge store: %s — reason: %s", f.statement[:80], reason)
+            filtered += 1
+            continue
+
         entry = FindingEntry.from_investigation_finding(f, scope=scope, account_id=account_id)
         if run_id:
             entry.source_run_ids = [run_id]
@@ -567,6 +627,12 @@ def store_investigation_to_knowledge(
             logger.warning("Failed to store finding '%s': %s", f.statement[:50], e)
 
     for h in hypotheses:
+        should_store, reason = _should_store_hypothesis(h)
+        if not should_store:
+            logger.info("Filtered hypothesis from knowledge store: %s — reason: %s", h.statement[:80], reason)
+            filtered += 1
+            continue
+
         entry = HypothesisEntry.from_investigation_hypothesis(h, scope=scope, account_id=account_id)
         if run_id:
             entry.source_run_ids = [run_id]
@@ -579,4 +645,4 @@ def store_investigation_to_knowledge(
         except Exception as e:
             logger.warning("Failed to store hypothesis '%s': %s", h.statement[:50], e)
 
-    return {"stored": stored, "merged": merged}
+    return {"stored": stored, "merged": merged, "filtered": filtered}

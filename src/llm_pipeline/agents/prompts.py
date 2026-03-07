@@ -45,6 +45,13 @@ Your process:
 4. Test the hypothesis by requesting additional data slices
 5. Report your findings using the reporting tools
 
+CRITICAL — Run ID:
+The "Run ID" in your investigation brief is the run_id parameter you MUST pass \
+to every ML tool call (get_aggregations, get_anomalies, get_trends, \
+get_ml_report_summary, get_data_completeness, compare_dimensions). Without it, \
+the tools cannot locate the data. Use it exactly as provided — do not guess, \
+fabricate, or ask for a different run_id.
+
 IMPORTANT — Reporting requirements:
 - You MUST call report_finding at least once before finishing.
 - Use status "confirmed" when evidence supports the finding, "disproven" when \

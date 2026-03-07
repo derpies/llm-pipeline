@@ -313,10 +313,14 @@ def investigate(
             hypotheses=hypotheses,
             run_id=report.run_id,
         )
-        typer.echo(
-            f"Knowledge store: {counts['stored']} entries stored, "
-            f"{counts['merged']} merged"
-        )
+        filtered = counts.get('filtered', 0)
+        parts = [
+            f"Knowledge store: {counts['stored']} entries stored",
+            f"{counts['merged']} merged",
+        ]
+        if filtered:
+            parts.append(f"{filtered} filtered")
+        typer.echo(", ".join(parts))
     except Exception as e:
         typer.echo(f"Warning: failed to store to knowledge hierarchy: {e}")
 
@@ -434,6 +438,61 @@ def knowledge_stats() -> None:
             typer.echo(f"  {tier.value:12s}: {total:5d} entries across {len(tenants)} tenants")
         except Exception as e:
             typer.echo(f"  {tier.value:12s}: error ({e})")
+
+
+@app.command()
+def knowledge_reset(
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip confirmation prompt")
+    ] = False,
+) -> None:
+    """Wipe all entries from the knowledge store (hypothesis, finding, truth tiers).
+
+    Does NOT touch the grounded tier. Use this to clear test/junk data and rebuild
+    from a fresh investigation run.
+    """
+    setup_logging()
+
+    from llm_pipeline.knowledge.models import KnowledgeTier
+    from llm_pipeline.knowledge.weaviate_schema import TIER_COLLECTIONS
+
+    # Grounded tier is excluded — it's imported from external corpus
+    tiers_to_clear = [KnowledgeTier.HYPOTHESIS, KnowledgeTier.FINDING, KnowledgeTier.TRUTH]
+
+    if not yes:
+        tier_names = ", ".join(t.value for t in tiers_to_clear)
+        if not typer.confirm(f"This will delete ALL entries in: {tier_names}. Continue?"):
+            typer.echo("Aborted.")
+            raise typer.Exit()
+
+    try:
+        from llm_pipeline.knowledge.store import get_weaviate_client
+
+        client = get_weaviate_client()
+    except Exception as e:
+        typer.echo(f"Cannot connect to Weaviate: {e}")
+        raise typer.Exit(1)
+
+    for tier in tiers_to_clear:
+        collection_name = TIER_COLLECTIONS[tier]
+        try:
+            collection = client.collections.get(collection_name)
+            tenants = collection.tenants.get()
+            total = 0
+            for tenant_name in tenants:
+                tenant_coll = collection.with_tenant(tenant_name)
+                # Delete all objects in this tenant
+                from weaviate.classes.query import Filter
+
+                result = tenant_coll.data.delete_many(
+                    where=Filter.by_property("entry_id").like("*"),
+                )
+                total += result.successful if hasattr(result, "successful") else 0
+            typer.echo(f"  {tier.value}: cleared {total} entries")
+        except Exception as e:
+            typer.echo(f"  {tier.value}: error ({e})")
+
+    typer.echo("Knowledge store reset complete.")
 
 
 @app.command()

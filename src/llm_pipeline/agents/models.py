@@ -52,6 +52,7 @@ class Finding(BaseModel):
     metrics_cited: dict[str, float] = Field(default_factory=dict)
     created_at: datetime
     run_id: str = ""
+    tool_use_failed: bool = False
 
 
 class CircuitBreakerBudget(BaseModel):

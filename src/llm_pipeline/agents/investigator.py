@@ -55,13 +55,17 @@ def _call_investigator(state: InvestigatorState) -> dict:
         len(state["messages"]) == 1 and isinstance(state["messages"][0], HumanMessage)
     ):
         topic = state["topic"]
+        run_id = state['run_id']
         brief_parts = [
             f"Investigate: {topic.title}",
             f"Dimension: {topic.dimension}={topic.dimension_value}",
             f"Metrics of interest: {', '.join(topic.metrics)}",
             f"Question: {topic.question}",
             f"Context: {topic.context}",
-            f"Run ID: {state['run_id']}",
+            f"\nRun ID for all ML tool calls: {run_id}",
+            f"(Pass run_id=\"{run_id}\" to every ML tool: get_aggregations, "
+            f"get_anomalies, get_trends, get_ml_report_summary, "
+            f"get_data_completeness, compare_dimensions)",
         ]
 
         # Inject prior context for follow-up rounds
@@ -188,6 +192,7 @@ def _extract_results(state: InvestigatorState) -> dict:
             evidence=[],
             created_at=now,
             run_id=run_id,
+            tool_use_failed=True,
         )
         findings.append(finding)
         digest_lines.append(f"[finding:inconclusive] {topic.title}: no reporting tools called")
