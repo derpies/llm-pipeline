@@ -7,6 +7,7 @@ from langgraph.prebuilt import ToolNode
 
 from llm_pipeline.agents.prompts import CHAT_SYSTEM_PROMPT
 from llm_pipeline.models.llm import get_llm
+from llm_pipeline.models.token_tracker import get_tracker
 from llm_pipeline.tools.common import CHAT_TOOLS
 
 
@@ -23,6 +24,7 @@ def _call_model(state: MessagesState) -> dict:
     llm = get_llm().bind_tools(CHAT_TOOLS)
     messages = [SystemMessage(content=CHAT_SYSTEM_PROMPT)] + state["messages"]
     response = llm.invoke(messages)
+    get_tracker().record(response)
     return {"messages": [response]}
 
 

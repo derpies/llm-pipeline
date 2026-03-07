@@ -430,6 +430,7 @@ class InvestigationRunRecord(Base):
     finding_count: Mapped[int] = mapped_column(Integer, default=0)
     hypothesis_count: Mapped[int] = mapped_column(Integer, default=0)
     checkpoint_digest: Mapped[str] = mapped_column(Text, default="")
+    label: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

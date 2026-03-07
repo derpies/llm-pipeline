@@ -14,6 +14,7 @@ from llm_pipeline.agents.prompts import ORCHESTRATOR_SYSTEM_PROMPT
 from llm_pipeline.agents.state import InvestigationCycleState
 from llm_pipeline.config import settings
 from llm_pipeline.models.llm import get_llm
+from llm_pipeline.models.token_tracker import get_tracker
 from llm_pipeline.tools.circuit_breaker import check_budget_exceeded
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
     prompt = (
         f"Review this ML analysis report and create investigation topics.\n\n"
         f"{summary}\n\n"
-        f"Create up to 3 focused investigation topics, prioritized by severity and impact. "
+        f"Create up to {settings.circuit_breaker_max_topics} focused investigation topics, prioritized by severity and impact. "
         f"Respond with a JSON array of objects, each with fields: "
         f"title, dimension, dimension_value, metrics (array), question, priority, context.\n"
         f"Respond with ONLY the JSON array, no other text."
@@ -67,6 +68,7 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
         SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
         HumanMessage(content=prompt),
     ])
+    get_tracker().record(response, model=settings.model_orchestrator)
 
     # Parse the response into InvestigationTopics
     topics = _parse_topics(response.content)
@@ -74,6 +76,7 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
     budget = CircuitBreakerBudget(
         max_iterations=settings.circuit_breaker_max_iterations,
         max_seconds=settings.circuit_breaker_max_seconds,
+        max_spend_usd=settings.circuit_breaker_max_spend_usd,
     )
 
     return {
@@ -103,10 +106,12 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
         budget=budget,
     )
 
+    tracker = get_tracker()
     digest_lines = [
         f"[eval] Iteration {iteration_count}: "
         f"{len(findings)} findings, {len(hypotheses)} hypotheses, "
-        f"{budget_check['elapsed_seconds']}s elapsed"
+        f"{budget_check['elapsed_seconds']}s elapsed, "
+        f"spend=${tracker.total_cost_usd:.2f}"
     ]
 
     # If budget exceeded, stop iteration
@@ -154,7 +159,7 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
         "Should we investigate further? If yes, create 1-2 focused follow-up topics "
         "to test untested hypotheses or resolve inconclusive findings.\n"
         "If the findings are sufficient, respond with an empty JSON array [].\n"
-        "Respond with ONLY a JSON array of investigation topic objects "
+        f"Respond with ONLY a JSON array of up to {settings.circuit_breaker_max_topics} investigation topic objects "
         "(fields: title, dimension, dimension_value, metrics, question, priority, context), "
         "or an empty array []."
     )
@@ -165,6 +170,7 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
             SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
             HumanMessage(content=eval_prompt),
         ])
+        get_tracker().record(response, model=settings.model_orchestrator)
         follow_up_topics = _parse_topics(response.content)
     except Exception as e:
         logger.warning("Failed to get follow-up evaluation: %s", e)
@@ -196,7 +202,8 @@ def orchestrator_checkpoint(state: InvestigationCycleState) -> dict:
     sections.append(f"Run: {state.get('run_id', 'unknown')}")
     sections.append(f"Iterations: {state.get('iteration_count', 0)}")
     sections.append(f"Findings: {len(findings)}")
-    sections.append(f"Hypotheses: {len(hypotheses)}\n")
+    sections.append(f"Hypotheses: {len(hypotheses)}")
+    sections.append(f"Spend: {get_tracker().summary()}\n")
 
     # Group findings by status
     if findings:
@@ -247,6 +254,15 @@ def _parse_topics(content: str) -> list[InvestigationTopic]:
 
     try:
         data = json.loads(text)
+        # Coerce unknown priority values to valid enum values
+        _PRIORITY_MAP = {"critical": "high", "urgent": "high", "normal": "medium", "minor": "low"}
+        _VALID_PRIORITIES = {"high", "medium", "low"}
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and "priority" in item:
+                    p = str(item["priority"]).lower()
+                    if p not in _VALID_PRIORITIES:
+                        item["priority"] = _PRIORITY_MAP.get(p, "high")
         adapter = TypeAdapter(list[InvestigationTopic])
         return adapter.validate_python(data)
     except (json.JSONDecodeError, Exception) as e:

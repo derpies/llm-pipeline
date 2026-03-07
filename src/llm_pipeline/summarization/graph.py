@@ -47,7 +47,10 @@ def _get_llm() -> BaseChatModel:
 
 def _invoke_llm(llm: BaseChatModel, prompt: str) -> str:
     """Invoke the LLM and return the response content as a string."""
+    from llm_pipeline.models.token_tracker import get_tracker
+
     response = llm.invoke(prompt)
+    get_tracker().record(response)
     return str(response.content)
 
 

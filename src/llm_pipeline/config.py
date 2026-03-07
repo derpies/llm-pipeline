@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     # LLM
     anthropic_api_key: str = ""
     openai_api_key: str = ""
-    llm_provider: str = "anthropic"
+    llm_provider: str = "anthropic"  # "anthropic", "openai", or "dry-run"
     llm_model: str = "claude-sonnet-4-20250514"
 
     # Per-agent model selection
@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     circuit_breaker_max_iterations: int = 5
     circuit_breaker_max_tokens: int = 100_000
     circuit_breaker_max_seconds: int = 300
+    circuit_breaker_max_topics: int = 1
+    circuit_breaker_max_spend_usd: float = 10.00
 
     # Postgres
     database_url: str = "postgresql://llm_pipeline:llm_pipeline@postgres:5432/llm_pipeline"
@@ -52,6 +54,9 @@ class Settings(BaseSettings):
     email_trend_min_points: int = 5
     email_trend_r_squared_min: float = 0.5
     email_trend_slope_min: float = 0.01
+
+    # Investigation
+    investigator_use_knowledge_store: bool = True
 
     # Summarization
     summarization_top_dimensions: int = 10

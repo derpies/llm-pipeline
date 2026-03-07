@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 from langchain_core.messages import HumanMessage
 
+from llm_pipeline.models.token_tracker import get_tracker, reset_tracker
 from llm_pipeline.utils.logging import setup_logging
 
 app = typer.Typer(help="llm-pipeline: Agentic LLM tool")
@@ -118,6 +119,7 @@ def analyze_email(
 ) -> None:
     """Analyze email delivery data — aggregate, detect anomalies, find trends."""
     setup_logging()
+    reset_tracker()
 
     from llm_pipeline.email_analytics.graph import build_email_analytics_graph
 
@@ -162,6 +164,10 @@ def analyze_email(
     if summarize:
         _run_summarization(report)
 
+    tracker = get_tracker()
+    if tracker.call_count > 0:
+        typer.echo(f"\nLLM spend: {tracker.summary()}")
+
 
 @app.command()
 def investigate(
@@ -178,9 +184,34 @@ def investigate(
         str | None,
         typer.Option("--run-id", "-r", help="Use a previous ML run instead of re-analyzing"),
     ] = None,
+    no_knowledge: Annotated[
+        bool,
+        typer.Option("--no-knowledge", help="Disable knowledge store retrieval for investigators"),
+    ] = False,
+    label: Annotated[
+        str,
+        typer.Option("--label", "-l", help="Label for this run (for A/B comparison)"),
+    ] = "",
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Use fake LLM responses (no API calls, no cost)"),
+    ] = False,
 ) -> None:
     """Run the investigation cycle — ML analysis → agent investigation → findings."""
     setup_logging()
+    reset_tracker()
+
+    if dry_run:
+        from llm_pipeline.config import settings as _settings
+
+        _settings.llm_provider = "dry-run"
+        typer.echo("DRY-RUN MODE — no real LLM calls will be made")
+
+    # Apply knowledge store toggle
+    if no_knowledge:
+        from llm_pipeline.config import settings
+
+        settings.investigator_use_knowledge_store = False
 
     from llm_pipeline.email_analytics.storage import init_db, load_report
 
@@ -229,25 +260,49 @@ def investigate(
         typer.echo("\nInvestigation complete (no digest produced).")
 
     # Persist results
-    from llm_pipeline.agents.storage import store_investigation_results
+    from llm_pipeline.agents.storage import (
+        store_investigation_results,
+        write_investigation_markdown,
+    )
 
     findings = result.get("findings", [])
     hypotheses = result.get("hypotheses", [])
+    started_at = result.get("started_at", report.started_at)
+    completed_at = result.get("completed_at")
+    iteration_count = result.get("iteration_count", 0)
     try:
         store_investigation_results(
             run_id=report.run_id,
             findings=findings,
             hypotheses=hypotheses,
             checkpoint_digest=digest,
-            iteration_count=result.get("iteration_count", 0),
-            started_at=result.get("started_at", report.started_at),
-            completed_at=result.get("completed_at"),
+            iteration_count=iteration_count,
+            started_at=started_at,
+            completed_at=completed_at,
+            label=label,
         )
         typer.echo(
             f"\nPersisted: {len(findings)} findings, {len(hypotheses)} hypotheses"
         )
     except Exception as e:
         typer.echo(f"\nWarning: failed to persist results: {e}")
+
+    # Write human-readable markdown
+    try:
+        md_path = write_investigation_markdown(
+            run_id=report.run_id,
+            findings=findings,
+            hypotheses=hypotheses,
+            checkpoint_digest=digest,
+            iteration_count=iteration_count,
+            started_at=started_at,
+            completed_at=completed_at,
+            label=label,
+            spend_summary=get_tracker().summary(),
+        )
+        typer.echo(f"Report: {md_path}")
+    except Exception as e:
+        typer.echo(f"Warning: failed to write markdown report: {e}")
 
     # Store to knowledge hierarchy
     try:
@@ -265,6 +320,8 @@ def investigate(
     except Exception as e:
         typer.echo(f"Warning: failed to store to knowledge hierarchy: {e}")
 
+    typer.echo(f"\nLLM spend: {get_tracker().summary()}")
+
 
 @app.command()
 def summarize(
@@ -272,6 +329,7 @@ def summarize(
 ) -> None:
     """Generate plain-language documents from a previous email analytics run."""
     setup_logging()
+    reset_tracker()
 
     from llm_pipeline.email_analytics.storage import init_db, load_report
 
@@ -284,6 +342,7 @@ def summarize(
     typer.echo(f"Loaded report {run_id}: {len(report.aggregations)} aggregations, "
                f"{len(report.anomalies)} anomalies, {len(report.trends)} trends")
     _run_summarization(report)
+    typer.echo(f"\nLLM spend: {get_tracker().summary()}")
 
 
 def _run_summarization(report) -> None:
@@ -375,6 +434,131 @@ def knowledge_stats() -> None:
             typer.echo(f"  {tier.value:12s}: {total:5d} entries across {len(tenants)} tenants")
         except Exception as e:
             typer.echo(f"  {tier.value:12s}: error ({e})")
+
+
+@app.command()
+def import_grounded(
+    directory: Annotated[Path, typer.Argument(help="Directory containing markdown files")],
+    chunk_size: Annotated[int, typer.Option("--chunk-size", help="Max chunk size in chars")] = 800,
+    chunk_overlap: Annotated[int, typer.Option("--chunk-overlap", help="Overlap between chunks")] = 200,
+) -> None:
+    """Import a grounding corpus directory into the Weaviate Grounded tier."""
+    setup_logging()
+
+    from llm_pipeline.knowledge.import_grounded import import_grounded_directory
+
+    if not directory.is_dir():
+        typer.echo(f"Not a directory: {directory}")
+        raise typer.Exit(1)
+
+    typer.echo(f"Importing grounding corpus from {directory}...")
+    result = import_grounded_directory(
+        path=directory,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+    typer.echo(
+        f"Done: {result['files']} files, "
+        f"{result['chunks_stored']} chunks stored, "
+        f"{result['chunks_merged']} chunks merged"
+    )
+
+
+@app.command()
+def compare_runs(
+    run_id_a: Annotated[str, typer.Argument(help="First run ID")],
+    run_id_b: Annotated[str, typer.Argument(help="Second run ID (can be same as A when using labels)")],
+    label_a: Annotated[str, typer.Option("--label-a", help="Label for run A")] = "",
+    label_b: Annotated[str, typer.Option("--label-b", help="Label for run B")] = "",
+) -> None:
+    """Compare two investigation runs side-by-side."""
+    setup_logging()
+
+    from llm_pipeline.agents.storage import load_investigation
+
+    a = load_investigation(run_id_a, label=label_a or None)
+    b = load_investigation(run_id_b, label=label_b or None)
+
+    if not a:
+        typer.echo(f"Run not found: {run_id_a}")
+        raise typer.Exit(1)
+    if not b:
+        typer.echo(f"Run not found: {run_id_b}")
+        raise typer.Exit(1)
+
+    typer.echo(_format_comparison(a, b))
+
+
+def _format_comparison(a: dict, b: dict) -> str:
+    """Format a side-by-side comparison of two investigation runs."""
+    from llm_pipeline.agents.models import FindingStatus
+
+    lines: list[str] = []
+
+    # --- Metadata ---
+    lines.append("=" * 60)
+    lines.append("INVESTIGATION RUN COMPARISON")
+    lines.append("=" * 60)
+
+    for label_key, run in [("A", a), ("B", b)]:
+        run_label = run.get("label") or "(no label)"
+        lines.append(
+            f"  Run {label_key}: {run['run_id']}  label={run_label}  "
+            f"iterations={run['iteration_count']}"
+        )
+    lines.append("")
+
+    # --- Finding counts by status ---
+    lines.append("FINDING COUNTS")
+    lines.append("-" * 40)
+
+    for status in FindingStatus:
+        count_a = sum(1 for f in a["findings"] if f.status == status)
+        count_b = sum(1 for f in b["findings"] if f.status == status)
+        lines.append(f"  {status.value:14s}  A={count_a:3d}  B={count_b:3d}")
+
+    lines.append(f"  {'TOTAL':14s}  A={len(a['findings']):3d}  B={len(b['findings']):3d}")
+    lines.append("")
+
+    # --- Matched findings (by topic_title) ---
+    topics_a = {f.topic_title: f for f in a["findings"]}
+    topics_b = {f.topic_title: f for f in b["findings"]}
+    shared = set(topics_a.keys()) & set(topics_b.keys())
+    only_a = set(topics_a.keys()) - shared
+    only_b = set(topics_b.keys()) - shared
+
+    if shared:
+        lines.append("MATCHED FINDINGS (same topic)")
+        lines.append("-" * 40)
+        for topic in sorted(shared):
+            fa, fb = topics_a[topic], topics_b[topic]
+            lines.append(f"  Topic: {topic}")
+            lines.append(f"    A [{fa.status.value}]: {fa.statement[:120]}")
+            lines.append(f"    B [{fb.status.value}]: {fb.statement[:120]}")
+            lines.append("")
+
+    if only_a:
+        lines.append("FINDINGS UNIQUE TO A")
+        lines.append("-" * 40)
+        for topic in sorted(only_a):
+            f = topics_a[topic]
+            lines.append(f"  [{f.status.value}] {topic}: {f.statement[:120]}")
+        lines.append("")
+
+    if only_b:
+        lines.append("FINDINGS UNIQUE TO B")
+        lines.append("-" * 40)
+        for topic in sorted(only_b):
+            f = topics_b[topic]
+            lines.append(f"  [{f.status.value}] {topic}: {f.statement[:120]}")
+        lines.append("")
+
+    # --- Hypothesis counts ---
+    lines.append("HYPOTHESIS COUNTS")
+    lines.append("-" * 40)
+    lines.append(f"  A={len(a['hypotheses']):3d}  B={len(b['hypotheses']):3d}")
+
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

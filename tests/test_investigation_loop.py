@@ -638,3 +638,40 @@ class TestBuildPriorContext:
         assert "ev1" in ctx
         assert "Maybe Y" in ctx
         assert "Because Z" in ctx
+
+
+# ---------------------------------------------------------------------------
+# Investigator tool list toggle tests
+# ---------------------------------------------------------------------------
+
+class TestInvestigatorToolToggle:
+    """Tests for dynamic investigator tool list based on config."""
+
+    def test_knowledge_tool_included_when_enabled(self):
+        from llm_pipeline.agents.investigator import _get_investigator_tools
+
+        with patch("llm_pipeline.agents.investigator.settings") as mock_settings:
+            mock_settings.investigator_use_knowledge_store = True
+            tools = _get_investigator_tools()
+            tool_names = [t.name for t in tools]
+            assert "retrieve_knowledge" in tool_names
+
+    def test_knowledge_tool_excluded_when_disabled(self):
+        from llm_pipeline.agents.investigator import _get_investigator_tools
+
+        with patch("llm_pipeline.agents.investigator.settings") as mock_settings:
+            mock_settings.investigator_use_knowledge_store = False
+            tools = _get_investigator_tools()
+            tool_names = [t.name for t in tools]
+            assert "retrieve_knowledge" not in tool_names
+
+    def test_base_tools_always_present(self):
+        from llm_pipeline.agents.investigator import INVESTIGATOR_BASE_TOOLS, _get_investigator_tools
+
+        with patch("llm_pipeline.agents.investigator.settings") as mock_settings:
+            mock_settings.investigator_use_knowledge_store = False
+            tools = _get_investigator_tools()
+            # All base tools should be present
+            base_names = {t.name for t in INVESTIGATOR_BASE_TOOLS}
+            tool_names = {t.name for t in tools}
+            assert base_names <= tool_names

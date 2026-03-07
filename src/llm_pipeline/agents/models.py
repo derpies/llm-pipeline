@@ -60,6 +60,7 @@ class CircuitBreakerBudget(BaseModel):
     max_iterations: int = 5
     max_tokens: int = 100_000
     max_seconds: int = 300
+    max_spend_usd: float = 10.00
 
 
 class GeneratedDocument(BaseModel):

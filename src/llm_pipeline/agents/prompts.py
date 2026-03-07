@@ -60,6 +60,10 @@ Key domain knowledge:
 - Zero-value fields mean "data unavailable", not zero
 - Seasonal patterns need sufficient temporal coverage to validate
 
+If retrieve_knowledge is available, use it EARLY to check what the knowledge \
+store already knows about your topic before diving into ML data. Ground your \
+investigation in existing domain knowledge.
+
 Be specific and evidence-based. Cite actual numbers from the data.
 Keep your reasoning terse — one line per step in your investigation log.
 """

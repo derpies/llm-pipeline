@@ -11,15 +11,30 @@ from langgraph.prebuilt import ToolNode
 
 from llm_pipeline.agents.prompts import INVESTIGATOR_SYSTEM_PROMPT
 from llm_pipeline.agents.state import InvestigatorState
+from llm_pipeline.config import settings
 from llm_pipeline.models.llm import get_llm
+from llm_pipeline.models.token_tracker import get_tracker
 from llm_pipeline.tools.common import get_current_datetime
 from llm_pipeline.tools.ml import INVESTIGATOR_ML_TOOLS
 from llm_pipeline.tools.reporting import REPORTING_TOOLS
 
 logger = logging.getLogger(__name__)
 
-# Tools available to the investigator
-INVESTIGATOR_TOOLS = [get_current_datetime] + INVESTIGATOR_ML_TOOLS + REPORTING_TOOLS
+# Base tools (always available)
+INVESTIGATOR_BASE_TOOLS = [get_current_datetime] + INVESTIGATOR_ML_TOOLS + REPORTING_TOOLS
+
+# Legacy alias — full list including conditional tools
+INVESTIGATOR_TOOLS = INVESTIGATOR_BASE_TOOLS
+
+
+def _get_investigator_tools() -> list:
+    """Build the investigator tool list, conditionally including knowledge retrieval."""
+    tools = list(INVESTIGATOR_BASE_TOOLS)
+    if settings.investigator_use_knowledge_store:
+        from llm_pipeline.tools.knowledge import retrieve_knowledge
+
+        tools.append(retrieve_knowledge)
+    return tools
 
 
 def _should_continue(state: InvestigatorState) -> str:
@@ -32,7 +47,8 @@ def _should_continue(state: InvestigatorState) -> str:
 
 def _call_investigator(state: InvestigatorState) -> dict:
     """Invoke the investigator LLM with the current state."""
-    llm = get_llm(role="investigator").bind_tools(INVESTIGATOR_TOOLS)
+    tools = _get_investigator_tools()
+    llm = get_llm(role="investigator").bind_tools(tools)
 
     # On first call, inject the investigation brief
     if len(state["messages"]) == 0 or (
@@ -68,6 +84,7 @@ def _call_investigator(state: InvestigatorState) -> dict:
         messages = [SystemMessage(content=INVESTIGATOR_SYSTEM_PROMPT)] + state["messages"]
 
     response = llm.invoke(messages)
+    get_tracker().record(response, model=settings.model_investigator)
     return {"messages": [response]}
 
 
@@ -109,6 +126,14 @@ def _extract_results(state: InvestigatorState) -> dict:
                         metrics_cited = {}
                 if not isinstance(metrics_cited, dict):
                     metrics_cited = {}
+                # Filter to numeric values only (LLM sometimes passes strings like "7-24")
+                clean_metrics: dict[str, float] = {}
+                for k, v in metrics_cited.items():
+                    try:
+                        clean_metrics[k] = float(v)
+                    except (ValueError, TypeError):
+                        pass
+                metrics_cited = clean_metrics
 
                 # Parse evidence — could be JSON string or list
                 evidence = args.get("evidence", "[]")
@@ -176,10 +201,11 @@ def _extract_results(state: InvestigatorState) -> dict:
 
 def build_investigator_graph():
     """Build the investigator subgraph with its own tool loop."""
+    tools = _get_investigator_tools()
     graph = StateGraph(InvestigatorState)
 
     graph.add_node("investigator", _call_investigator)
-    graph.add_node("tools", ToolNode(INVESTIGATOR_TOOLS))
+    graph.add_node("tools", ToolNode(tools))
     graph.add_node("extract_results", _extract_results)
 
     graph.add_edge(START, "investigator")

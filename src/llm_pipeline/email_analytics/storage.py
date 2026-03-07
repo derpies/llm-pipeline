@@ -43,7 +43,9 @@ def get_engine():
 
 
 def init_db() -> None:
-    """Create all email analytics tables (idempotent)."""
+    """Create all tables (email analytics + knowledge audit). Idempotent."""
+    import llm_pipeline.knowledge.models  # noqa: F401 — registers KnowledgeAuditRecord with Base
+
     engine = get_engine()
     Base.metadata.create_all(engine)
     logger.info("Email analytics tables created/verified")

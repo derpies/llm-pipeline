@@ -36,6 +36,11 @@ def get_llm(
         model = getattr(settings, _ROLE_MODEL_MAP[role], None)
     model = model or settings.llm_model
 
+    if provider == "dry-run":
+        from llm_pipeline.models.dry_run import DryRunChatModel
+
+        return DryRunChatModel(model_name=model, role=role or "")
+
     if provider == "anthropic":
         from langchain_anthropic import ChatAnthropic
 
