@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import END, START, StateGraph
@@ -50,12 +51,13 @@ def _call_investigator(state: InvestigatorState) -> dict:
     tools = _get_investigator_tools()
     llm = get_llm(role="investigator").bind_tools(tools)
 
+    topic = state["topic"]
+    run_id = state.get("run_id", "")
+
     # On first call, inject the investigation brief
     if len(state["messages"]) == 0 or (
         len(state["messages"]) == 1 and isinstance(state["messages"][0], HumanMessage)
     ):
-        topic = state["topic"]
-        run_id = state['run_id']
         brief_parts = [
             f"Investigate: {topic.title}",
             f"Dimension: {topic.dimension}={topic.dimension_value}",
@@ -63,7 +65,7 @@ def _call_investigator(state: InvestigatorState) -> dict:
             f"Question: {topic.question}",
             f"Context: {topic.context}",
             f"\nRun ID for all ML tool calls: {run_id}",
-            f"(Pass run_id=\"{run_id}\" to every ML tool: get_aggregations, "
+            f'(Pass run_id="{run_id}" to every ML tool: get_aggregations, '
             f"get_anomalies, get_trends, get_ml_report_summary, "
             f"get_data_completeness, compare_dimensions)",
         ]
@@ -79,6 +81,14 @@ def _call_investigator(state: InvestigatorState) -> dict:
             "You MUST call report_finding at least once before finishing."
         )
         brief = "\n".join(brief_parts)
+        logger.info(
+            "investigator brief sent run_id=%s topic=%s dimension=%s=%s has_prior_context=%s",
+            run_id,
+            topic.title,
+            topic.dimension,
+            topic.dimension_value,
+            bool(prior_context),
+        )
 
         messages = [
             SystemMessage(content=INVESTIGATOR_SYSTEM_PROMPT),
@@ -87,8 +97,17 @@ def _call_investigator(state: InvestigatorState) -> dict:
     else:
         messages = [SystemMessage(content=INVESTIGATOR_SYSTEM_PROMPT)] + state["messages"]
 
+    t0 = time.monotonic()
     response = llm.invoke(messages)
+    elapsed = time.monotonic() - t0
     get_tracker().record(response, model=settings.model_investigator)
+    logger.debug(
+        "investigator llm_call run_id=%s topic=%s messages=%d elapsed_s=%.2f",
+        run_id,
+        topic.title,
+        len(messages),
+        elapsed,
+    )
     return {"messages": [response]}
 
 
@@ -131,7 +150,8 @@ def _extract_results(state: InvestigatorState) -> dict:
                     except (json.JSONDecodeError, TypeError):
                         logger.warning(
                             "[normalization] %s: metrics_cited is not valid JSON: %r",
-                            topic.title, metrics_cited,
+                            topic.title,
+                            metrics_cited,
                         )
                         normalization_count += 1
                         metrics_cited = {}
@@ -145,7 +165,9 @@ def _extract_results(state: InvestigatorState) -> dict:
                     except (ValueError, TypeError):
                         logger.warning(
                             "[normalization] %s: dropping non-numeric metric %s=%r",
-                            topic.title, k, v,
+                            topic.title,
+                            k,
+                            v,
                         )
                         normalization_count += 1
                 metrics_cited = clean_metrics
@@ -167,7 +189,8 @@ def _extract_results(state: InvestigatorState) -> dict:
                 except ValueError:
                     logger.warning(
                         "[normalization] %s: invalid status %r, coercing to INCONCLUSIVE",
-                        topic.title, status_str,
+                        topic.title,
+                        status_str,
                     )
                     normalization_count += 1
                     status = FindingStatus.INCONCLUSIVE
@@ -187,9 +210,7 @@ def _extract_results(state: InvestigatorState) -> dict:
                     run_id=run_id,
                 )
                 findings.append(finding)
-                digest_lines.append(
-                    f"[finding:{status.value}] {finding.statement}"
-                )
+                digest_lines.append(f"[finding:{status.value}] {finding.statement}")
 
             elif name == "report_hypothesis":
                 hypothesis = Hypothesis(
@@ -221,6 +242,24 @@ def _extract_results(state: InvestigatorState) -> dict:
         )
         findings.append(finding)
         digest_lines.append(f"[finding:inconclusive] {topic.title}: no reporting tools called")
+
+    # Count total tool calls for diagnostics
+    total_tool_calls = sum(
+        len(msg.tool_calls)
+        for msg in state["messages"]
+        if hasattr(msg, "tool_calls") and msg.tool_calls
+    )
+    is_fallback = any(f.tool_use_failed for f in findings)
+    logger.info(
+        "extract_results completed run_id=%s topic=%s "
+        "findings=%d hypotheses=%d tool_calls=%d is_fallback=%s",
+        run_id,
+        topic.title,
+        len(findings),
+        len(hypotheses),
+        total_tool_calls,
+        is_fallback,
+    )
 
     return {
         "findings": findings,

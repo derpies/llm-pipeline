@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -70,6 +71,14 @@ def store_investigation_results(
     quality_warnings: list[str] | None = None,
 ) -> None:
     """Persist investigation results to Postgres (atomic commit)."""
+    logger.info(
+        "store_investigation started run_id=%s findings=%d hypotheses=%d status=%s",
+        run_id,
+        len(findings),
+        len(hypotheses),
+        status,
+    )
+    t0 = time.monotonic()
     engine = get_engine()
     run_warnings = list(quality_warnings or [])
 
@@ -95,11 +104,10 @@ def store_investigation_results(
             if finding_warnings:
                 logger.warning(
                     "Finding quality warnings for '%s': %s",
-                    f.topic_title, finding_warnings,
+                    f.topic_title,
+                    finding_warnings,
                 )
-                run_warnings.extend(
-                    f"{f.topic_title}: {w}" for w in finding_warnings
-                )
+                run_warnings.extend(f"{f.topic_title}: {w}" for w in finding_warnings)
 
             session.add(
                 InvestigationFindingRecord(
@@ -119,11 +127,10 @@ def store_investigation_results(
             if hyp_warnings:
                 logger.warning(
                     "Hypothesis quality warnings for '%s': %s",
-                    h.topic_title, hyp_warnings,
+                    h.topic_title,
+                    hyp_warnings,
                 )
-                run_warnings.extend(
-                    f"{h.topic_title}: {w}" for w in hyp_warnings
-                )
+                run_warnings.extend(f"{h.topic_title}: {w}" for w in hyp_warnings)
 
             session.add(
                 InvestigationHypothesisRecord(
@@ -138,13 +145,15 @@ def store_investigation_results(
         run.quality_warnings = json.dumps(run_warnings)
 
         session.commit()
+        elapsed = time.monotonic() - t0
         logger.info(
-            "Stored investigation %s [%s]: %d findings, %d hypotheses, %d warnings",
+            "store_investigation completed run_id=%s "
+            "findings=%d hypotheses=%d warnings=%d elapsed_s=%.2f",
             run_id,
-            status,
             len(findings),
             len(hypotheses),
             len(run_warnings),
+            elapsed,
         )
 
 
@@ -160,9 +169,7 @@ def load_investigation(run_id: str, *, label: str | None = None) -> dict | None:
     engine = get_engine()
 
     with Session(engine) as session:
-        stmt = select(InvestigationRunRecord).where(
-            InvestigationRunRecord.run_id == run_id
-        )
+        stmt = select(InvestigationRunRecord).where(InvestigationRunRecord.run_id == run_id)
         if label is not None:
             stmt = stmt.where(InvestigationRunRecord.label == label)
         stmt = stmt.order_by(InvestigationRunRecord.id.desc()).limit(1)
@@ -255,6 +262,7 @@ def write_investigation_markdown(
 
     Returns the path to the written file.
     """
+    t0 = time.monotonic()
     out = output_dir or OUTPUT_DIR
     out.mkdir(parents=True, exist_ok=True)
 
@@ -294,8 +302,10 @@ def write_investigation_markdown(
 
     lines.append("## Summary")
     lines.append("")
-    lines.append(f"- **{len(findings)}** findings: "
-                 + ", ".join(f"{len(v)} {k}" for k, v in sorted(by_status.items())))
+    lines.append(
+        f"- **{len(findings)}** findings: "
+        + ", ".join(f"{len(v)} {k}" for k, v in sorted(by_status.items()))
+    )
     lines.append(f"- **{len(hypotheses)}** hypotheses (untested)")
     lines.append("")
 
@@ -363,5 +373,11 @@ def write_investigation_markdown(
         lines.append("")
 
     path.write_text("\n".join(lines))
-    logger.info("Wrote investigation report to %s", path)
+    elapsed = time.monotonic() - t0
+    logger.info(
+        "write_investigation_markdown completed run_id=%s path=%s elapsed_s=%.2f",
+        run_id,
+        path,
+        elapsed,
+    )
     return path

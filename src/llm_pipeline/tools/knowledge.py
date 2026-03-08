@@ -1,8 +1,13 @@
 """Agent tool for querying the knowledge store."""
 
+import logging
+import time
+
 from langchain_core.tools import tool
 
 from llm_pipeline.knowledge.models import KnowledgeScope
+
+logger = logging.getLogger(__name__)
 
 
 @tool
@@ -22,12 +27,17 @@ def retrieve_knowledge(
         scope: "community" for aggregate knowledge, "account" for per-account.
         account_id: Required when scope is "account".
     """
+    logger.debug("tool retrieve_knowledge called query=%.80s scope=%s", query, scope)
+    t0 = time.monotonic()
     from llm_pipeline.knowledge.retrieval import retrieve_knowledge as _retrieve
 
     scope_enum = KnowledgeScope.ACCOUNT if scope == "account" else KnowledgeScope.COMMUNITY
     results = _retrieve(query=query, scope=scope_enum, account_id=account_id, top_k=5)
 
     if not results:
+        logger.debug(
+            "tool retrieve_knowledge returned results=0 elapsed_s=%.2f", time.monotonic() - t0
+        )
         return "No relevant knowledge found in the knowledge store."
 
     lines = []
@@ -42,4 +52,9 @@ def retrieve_knowledge(
             f"    score={r.weighted_score:.3f} observations={r.observation_count}"
         )
 
+    logger.debug(
+        "tool retrieve_knowledge returned results=%d elapsed_s=%.2f",
+        len(results),
+        time.monotonic() - t0,
+    )
     return "\n\n".join(lines)

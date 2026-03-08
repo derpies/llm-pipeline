@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     log_format: str = "dev"  # "dev" for pretty-print, "json" for structured
+    log_dir: str = "output/logs"  # directory for persistent log files
 
 
 settings = Settings()

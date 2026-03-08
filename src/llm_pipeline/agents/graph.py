@@ -9,6 +9,7 @@ Flow:
 from __future__ import annotations
 
 import logging
+import time
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
@@ -38,18 +39,41 @@ def _investigate_topic(state: InvestigatorState) -> dict:
     from llm_pipeline.agents.models import Finding, FindingStatus
 
     topic = state["topic"]
+    run_id = state.get("run_id", "")
+    logger.info(
+        "investigate_topic started run_id=%s topic=%s priority=%s",
+        run_id,
+        topic.title,
+        topic.priority,
+    )
+    t0 = time.monotonic()
     try:
         result = _investigator_graph.invoke(state)
+        findings = result.get("findings", [])
+        hypotheses = result.get("hypotheses", [])
+        elapsed = time.monotonic() - t0
+        logger.info(
+            "investigate_topic completed run_id=%s topic=%s "
+            "findings=%d hypotheses=%d elapsed_s=%.2f",
+            run_id,
+            topic.title,
+            len(findings),
+            len(hypotheses),
+            elapsed,
+        )
         return {
-            "findings": result.get("findings", []),
-            "hypotheses": result.get("hypotheses", []),
+            "findings": findings,
+            "hypotheses": hypotheses,
             "digest_lines": result.get("digest_lines", []),
             "completed_topics": [topic.title],
             "topic_errors": [],
         }
     except Exception as e:
+        elapsed = time.monotonic() - t0
         error_msg = f"{topic.title}: {type(e).__name__}: {e}"
-        logger.error("Investigator failed for topic '%s': %s", topic.title, e)
+        logger.error(
+            "Investigator failed for topic '%s': %s elapsed_s=%.2f", topic.title, e, elapsed
+        )
         fallback = Finding(
             topic_title=topic.title,
             statement=f"Investigation failed: {type(e).__name__}: {e}",
@@ -72,6 +96,7 @@ def _route_investigations(state: InvestigationCycleState) -> list[Send]:
     """Fan out: dispatch one investigator per topic."""
     topics = state.get("investigation_plan", [])
     run_id = state.get("run_id", "")
+    logger.info("fan_out dispatching run_id=%s topic_count=%d", run_id, len(topics))
 
     sends = []
     for topic in topics:
@@ -122,13 +147,16 @@ def _route_after_evaluate(
 ) -> str | list[Send]:
     """Route after evaluation: synthesize if done, or fan-out for more investigation."""
     topics = state.get("investigation_plan", [])
+    run_id = state.get("run_id", "")
 
     if not topics:
+        logger.debug("routing to synthesize run_id=%s", run_id)
         return "synthesize"
+
+    logger.info("follow_up dispatching run_id=%s topic_count=%d", run_id, len(topics))
 
     # Build prior context for follow-up investigators
     prior_context = _build_prior_context(state)
-    run_id = state.get("run_id", "")
 
     sends = []
     for topic in topics:

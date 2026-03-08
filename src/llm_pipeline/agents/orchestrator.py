@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import UTC, datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -24,6 +25,13 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
     """Read ML report summary, produce investigation topics."""
     report = state["ml_report"]
     run_id = state["run_id"]
+    logger.info(
+        "orchestrator_plan started run_id=%s anomalies=%d trends=%d",
+        run_id,
+        len(report.anomalies),
+        len(report.trends),
+    )
+    t0 = time.monotonic()
 
     # Build a summary of what's in the report for the LLM
     summary_lines = [
@@ -64,14 +72,24 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
         f"Respond with ONLY the JSON array, no other text."
     )
 
-    response = llm.invoke([
-        SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
-        HumanMessage(content=prompt),
-    ])
+    response = llm.invoke(
+        [
+            SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ]
+    )
     get_tracker().record(response, model=settings.model_orchestrator)
 
     # Parse the response into InvestigationTopics
     topics = _parse_topics(response.content)
+
+    elapsed = time.monotonic() - t0
+    logger.info(
+        "orchestrator_plan completed run_id=%s topics=%d elapsed_s=%.2f",
+        run_id,
+        len(topics),
+        elapsed,
+    )
 
     budget = CircuitBreakerBudget(
         max_iterations=settings.circuit_breaker_max_iterations,
@@ -99,6 +117,15 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
     iteration_count = state.get("iteration_count", 0) + 1
     started_at = state.get("started_at", datetime.now(UTC))
     budget = state.get("budget", CircuitBreakerBudget())
+    run_id = state.get("run_id", "")
+    logger.info(
+        "orchestrator_evaluate started run_id=%s iteration=%d findings=%d hypotheses=%d",
+        run_id,
+        iteration_count,
+        len(findings),
+        len(hypotheses),
+    )
+    t0 = time.monotonic()
 
     budget_check = check_budget_exceeded(
         iteration_count=iteration_count,
@@ -117,6 +144,12 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
     # If budget exceeded, stop iteration
     if budget_check["exceeded"]:
         reasons = ", ".join(budget_check["reasons"])
+        logger.warning(
+            "orchestrator_evaluate budget_exceeded run_id=%s iteration=%d reasons=%s",
+            run_id,
+            iteration_count,
+            reasons,
+        )
         digest_lines.append(f"[circuit_breaker] Budget exceeded: {reasons}")
         return {
             "iteration_count": iteration_count,
@@ -167,10 +200,12 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
     evaluation_error = False
     try:
         llm = get_llm(role="orchestrator")
-        response = llm.invoke([
-            SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
-            HumanMessage(content=eval_prompt),
-        ])
+        response = llm.invoke(
+            [
+                SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
+                HumanMessage(content=eval_prompt),
+            ]
+        )
         get_tracker().record(response, model=settings.model_orchestrator)
         follow_up_topics = _parse_topics(response.content)
     except Exception as e:
@@ -180,11 +215,21 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
         follow_up_topics = []
 
     if follow_up_topics:
-        digest_lines.append(
-            f"[eval] Generated {len(follow_up_topics)} follow-up topics"
-        )
+        digest_lines.append(f"[eval] Generated {len(follow_up_topics)} follow-up topics")
     elif not evaluation_error:
         digest_lines.append("[eval] No follow-up needed — moving to synthesis")
+
+    elapsed = time.monotonic() - t0
+    decision = "follow_up" if follow_up_topics else ("error" if evaluation_error else "synthesize")
+    logger.info(
+        "orchestrator_evaluate completed run_id=%s iteration=%d "
+        "decision=%s follow_up=%d elapsed_s=%.2f",
+        run_id,
+        iteration_count,
+        decision,
+        len(follow_up_topics),
+        elapsed,
+    )
 
     return {
         "iteration_count": iteration_count,
@@ -251,6 +296,13 @@ def orchestrator_checkpoint(state: InvestigationCycleState) -> dict:
         sections.append(f"- {line}")
 
     checkpoint_digest = "\n".join(sections)
+    logger.info(
+        "orchestrator_checkpoint produced run_id=%s findings=%d hypotheses=%d digest_len=%d",
+        state.get("run_id", ""),
+        len(findings),
+        len(hypotheses),
+        len(checkpoint_digest),
+    )
     return {"checkpoint_digest": checkpoint_digest}
 
 

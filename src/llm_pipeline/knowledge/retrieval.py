@@ -7,6 +7,7 @@ Higher tiers (truth, grounded) are weighted more heavily than lower tiers.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 import weaviate.classes.query as wq
@@ -71,6 +72,10 @@ def retrieve_knowledge(
     Searches each requested tier separately, applies tier-based weighting,
     merges and re-sorts by weighted score. Returns top_k results.
     """
+    logger.debug(
+        "retrieve_knowledge started query=%.80s scope=%s top_k=%d", query, scope.value, top_k
+    )
+    t0 = time.monotonic()
     if client is None:
         from llm_pipeline.knowledge.store import get_weaviate_client
 
@@ -94,10 +99,19 @@ def retrieve_knowledge(
                 limit=top_k,
                 return_metadata=["distance"],
                 return_properties=[
-                    "entry_id", "statement", "topic", "dimension", "dimension_value",
-                    "scope", "account_id", "confidence", "observation_count",
-                    "status", "source_run_ids",
-                ] + (["finding_status"] if tier == KnowledgeTier.FINDING else []),
+                    "entry_id",
+                    "statement",
+                    "topic",
+                    "dimension",
+                    "dimension_value",
+                    "scope",
+                    "account_id",
+                    "confidence",
+                    "observation_count",
+                    "status",
+                    "source_run_ids",
+                ]
+                + (["finding_status"] if tier == KnowledgeTier.FINDING else []),
             )
 
             tier_weight = TIER_WEIGHTS[tier]
@@ -149,7 +163,11 @@ def retrieve_knowledge(
 
     # Sort by weighted score descending
     all_results.sort(key=lambda r: r.weighted_score, reverse=True)
-    return all_results[:top_k]
+    final = all_results[:top_k]
+    logger.debug(
+        "retrieve_knowledge completed results=%d elapsed_s=%.2f", len(final), time.monotonic() - t0
+    )
+    return final
 
 
 def retrieve_for_account(

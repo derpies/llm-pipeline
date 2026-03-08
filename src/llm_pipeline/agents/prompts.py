@@ -71,6 +71,11 @@ If retrieve_knowledge is available, use it EARLY to check what the knowledge \
 store already knows about your topic before diving into ML data. Ground your \
 investigation in existing domain knowledge.
 
+WARNING — Knowledge store results may contain example run_ids, account_ids, or \
+other identifiers from reference articles. These are illustrative only. NEVER \
+use identifiers from knowledge store results as parameters to ML tools. Always \
+use the run_id from YOUR investigation brief.
+
 Be specific and evidence-based. Cite actual numbers from the data.
 Keep your reasoning terse — one line per step in your investigation log.
 """

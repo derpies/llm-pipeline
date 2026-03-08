@@ -198,7 +198,7 @@ def investigate(
     ] = False,
 ) -> None:
     """Run the investigation cycle — ML analysis → agent investigation → findings."""
-    setup_logging()
+    setup_logging(run_id=run_id or "")
     reset_tracker()
 
     if dry_run:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -42,10 +43,14 @@ def get_weaviate_client() -> weaviate.WeaviateClient:
     if _weaviate_client is None or not _weaviate_client.is_connected():
         _weaviate_client = weaviate.connect_to_custom(
             http_host=settings.weaviate_url.replace("http://", "").split(":")[0],
-            http_port=int(settings.weaviate_url.split(":")[-1]) if ":" in settings.weaviate_url.rsplit("//", 1)[-1] else 8080,
+            http_port=int(settings.weaviate_url.split(":")[-1])
+            if ":" in settings.weaviate_url.rsplit("//", 1)[-1]
+            else 8080,
             http_secure=False,
             grpc_host=settings.weaviate_grpc_url.split(":")[0],
-            grpc_port=int(settings.weaviate_grpc_url.split(":")[-1]) if ":" in settings.weaviate_grpc_url else 50051,
+            grpc_port=int(settings.weaviate_grpc_url.split(":")[-1])
+            if ":" in settings.weaviate_grpc_url
+            else 50051,
             grpc_secure=False,
         )
         init_weaviate(_weaviate_client)
@@ -170,6 +175,7 @@ def store_entry(
     Checks for duplicates first — if a near-duplicate exists in the same
     tier/tenant, merges observations instead of creating a new entry.
     """
+    t0 = time.monotonic()
     client = client or get_weaviate_client()
     own_session = session is None
     session = session or _get_db_session()
@@ -193,6 +199,12 @@ def store_entry(
             )
             if own_session:
                 session.commit()
+            logger.debug(
+                "store_entry completed entry_id=%s tier=%s merged=True elapsed_s=%.2f",
+                existing_id,
+                entry.tier.value,
+                time.monotonic() - t0,
+            )
             return existing_id, True
 
         # Insert new
@@ -214,6 +226,12 @@ def store_entry(
         if own_session:
             session.commit()
 
+        logger.debug(
+            "store_entry completed entry_id=%s tier=%s merged=False elapsed_s=%.2f",
+            entry.id,
+            entry.tier.value,
+            time.monotonic() - t0,
+        )
         return entry.id, False
 
     except Exception:
@@ -573,7 +591,9 @@ def _should_store_finding(finding) -> tuple[bool, str]:
 def _should_store_hypothesis(hypothesis) -> tuple[bool, str]:
     """Check if a hypothesis is worth storing. Returns (should_store, rejection_reason)."""
     # Reject dry-run entries
-    if getattr(hypothesis, "run_id", "") == "dry-run" or hypothesis.statement.startswith("DRY_RUN:"):
+    if getattr(hypothesis, "run_id", "") == "dry-run" or hypothesis.statement.startswith(
+        "DRY_RUN:"
+    ):
         return False, "dry_run"
 
     # Reject LLM meta-commentary
@@ -602,6 +622,13 @@ def store_investigation_to_knowledge(
 
     Returns counts: {"stored": N, "merged": M, "filtered": F}.
     """
+    logger.info(
+        "store_to_knowledge started run_id=%s findings=%d hypotheses=%d",
+        run_id,
+        len(findings),
+        len(hypotheses),
+    )
+    t0 = time.monotonic()
     client = client or get_weaviate_client()
     stored = 0
     merged = 0
@@ -610,7 +637,9 @@ def store_investigation_to_knowledge(
     for f in findings:
         should_store, reason = _should_store_finding(f)
         if not should_store:
-            logger.info("Filtered finding from knowledge store: %s — reason: %s", f.statement[:80], reason)
+            logger.info(
+                "Filtered finding from knowledge store: %s — reason: %s", f.statement[:80], reason
+            )
             filtered += 1
             continue
 
@@ -629,7 +658,11 @@ def store_investigation_to_knowledge(
     for h in hypotheses:
         should_store, reason = _should_store_hypothesis(h)
         if not should_store:
-            logger.info("Filtered hypothesis from knowledge store: %s — reason: %s", h.statement[:80], reason)
+            logger.info(
+                "Filtered hypothesis from knowledge store: %s — reason: %s",
+                h.statement[:80],
+                reason,
+            )
             filtered += 1
             continue
 
@@ -645,4 +678,13 @@ def store_investigation_to_knowledge(
         except Exception as e:
             logger.warning("Failed to store hypothesis '%s': %s", h.statement[:50], e)
 
+    elapsed = time.monotonic() - t0
+    logger.info(
+        "store_to_knowledge completed run_id=%s stored=%d merged=%d filtered=%d elapsed_s=%.2f",
+        run_id,
+        stored,
+        merged,
+        filtered,
+        elapsed,
+    )
     return {"stored": stored, "merged": merged, "filtered": filtered}
