@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from llm_pipeline.agents.models import Finding, FindingStatus, Hypothesis
+from llm_pipeline.agents.report_models import InvestigationReport
 from llm_pipeline.email_analytics.models import (
     InvestigationFindingRecord,
     InvestigationHypothesisRecord,
@@ -381,3 +382,87 @@ def write_investigation_markdown(
         elapsed,
     )
     return path
+
+
+def store_investigation_report(
+    run_id: str,
+    report: InvestigationReport,
+) -> None:
+    """Render and persist an InvestigationReport to Postgres."""
+    from llm_pipeline.agents.report_renderer import render_json, render_markdown
+    from llm_pipeline.email_analytics.models import InvestigationReportRecord
+
+    logger.info("store_investigation_report started run_id=%s", run_id)
+    t0 = time.monotonic()
+
+    report_json = render_json(report)
+    report_md = render_markdown(report)
+
+    engine = get_engine()
+    with Session(engine) as session:
+        session.add(
+            InvestigationReportRecord(
+                run_id=run_id,
+                report_json=report_json,
+                report_markdown=report_md,
+            )
+        )
+        session.commit()
+
+    elapsed = time.monotonic() - t0
+    logger.info(
+        "store_investigation_report completed run_id=%s elapsed_s=%.2f",
+        run_id,
+        elapsed,
+    )
+
+
+def load_investigation_report(run_id: str) -> InvestigationReport | None:
+    """Load an InvestigationReport from Postgres by run_id."""
+    from sqlalchemy import select as sa_select
+
+    from llm_pipeline.agents.report_models import InvestigationReport
+    from llm_pipeline.email_analytics.models import InvestigationReportRecord
+
+    engine = get_engine()
+    with Session(engine) as session:
+        stmt = (
+            sa_select(InvestigationReportRecord)
+            .where(InvestigationReportRecord.run_id == run_id)
+            .order_by(InvestigationReportRecord.id.desc())
+            .limit(1)
+        )
+        row = session.execute(stmt).scalar_one_or_none()
+        if row is None:
+            return None
+
+        return InvestigationReport.model_validate_json(row.report_json)
+
+
+def write_investigation_report_files(
+    run_id: str,
+    report: InvestigationReport,
+    output_dir: Path | None = None,
+) -> tuple[Path, Path]:
+    """Write report JSON and markdown files to disk.
+
+    Returns (json_path, md_path).
+    """
+    from llm_pipeline.agents.report_renderer import render_json, render_markdown
+
+    out = output_dir or OUTPUT_DIR
+    out.mkdir(parents=True, exist_ok=True)
+
+    json_path = out / f"{run_id}-report.json"
+    md_path = out / f"{run_id}-report.md"
+
+    json_path.write_text(render_json(report))
+    md_path.write_text(render_markdown(report))
+
+    logger.info(
+        "write_investigation_report_files run_id=%s json=%s md=%s",
+        run_id,
+        json_path,
+        md_path,
+    )
+    return json_path, md_path

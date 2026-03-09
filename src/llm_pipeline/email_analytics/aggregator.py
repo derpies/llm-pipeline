@@ -138,12 +138,16 @@ def aggregate(
             pl.col("pre_edge_latency").drop_nulls().mean().alias("pre_edge_latency_mean"),
             pl.col("pre_edge_latency").drop_nulls().median().alias("pre_edge_latency_p50"),
             pl.col("pre_edge_latency").drop_nulls().quantile(0.95).alias("pre_edge_latency_p95"),
+            pl.col("pre_edge_latency").drop_nulls().quantile(0.99).alias("pre_edge_latency_p99"),
+            pl.col("pre_edge_latency").drop_nulls().max().alias("pre_edge_latency_max"),
         ])
     if has_delivery_time:
         latency_aggs.extend([
             pl.col("delivery_attempt_time").drop_nulls().mean().alias("delivery_time_mean"),
             pl.col("delivery_attempt_time").drop_nulls().median().alias("delivery_time_p50"),
             pl.col("delivery_attempt_time").drop_nulls().quantile(0.95).alias("delivery_time_p95"),
+            pl.col("delivery_attempt_time").drop_nulls().quantile(0.99).alias("delivery_time_p99"),
+            pl.col("delivery_attempt_time").drop_nulls().max().alias("delivery_time_max"),
         ])
 
     for dim in dimensions:
@@ -193,10 +197,14 @@ def aggregate(
                 bucket_kwargs["pre_edge_latency_mean"] = row.get("pre_edge_latency_mean")
                 bucket_kwargs["pre_edge_latency_p50"] = row.get("pre_edge_latency_p50")
                 bucket_kwargs["pre_edge_latency_p95"] = row.get("pre_edge_latency_p95")
+                bucket_kwargs["pre_edge_latency_p99"] = row.get("pre_edge_latency_p99")
+                bucket_kwargs["pre_edge_latency_max"] = row.get("pre_edge_latency_max")
             if has_delivery_time:
                 bucket_kwargs["delivery_time_mean"] = row.get("delivery_time_mean")
                 bucket_kwargs["delivery_time_p50"] = row.get("delivery_time_p50")
                 bucket_kwargs["delivery_time_p95"] = row.get("delivery_time_p95")
+                bucket_kwargs["delivery_time_p99"] = row.get("delivery_time_p99")
+                bucket_kwargs["delivery_time_max"] = row.get("delivery_time_max")
 
             buckets.append(AggregationBucket(**bucket_kwargs))
 

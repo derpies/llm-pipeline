@@ -108,6 +108,21 @@ class TestAggregate:
         assert vh_buckets[0].pre_edge_latency_mean is not None
         assert vh_buckets[0].delivery_time_mean is not None
 
+    def test_latency_p99_and_max_fields(self, sample_events, sample_classifications):
+        df = events_to_dataframe(sample_events, sample_classifications)
+        buckets = aggregate(df, window_hours=1, dimensions=["listid"])
+
+        vh_buckets = [b for b in buckets if b.dimension_value == "SEG_E_VH"]
+        assert len(vh_buckets) == 1
+        b = vh_buckets[0]
+        assert b.pre_edge_latency_p99 is not None
+        assert b.pre_edge_latency_max is not None
+        assert b.delivery_time_p99 is not None
+        assert b.delivery_time_max is not None
+        # max >= p99 >= p95
+        assert b.delivery_time_max >= b.delivery_time_p99
+        assert b.delivery_time_p99 >= b.delivery_time_p95
+
     def test_time_window_truncation(self):
         events = [
             DeliveryEvent(

@@ -250,9 +250,13 @@ class AggregationBucket(BaseModel):
     pre_edge_latency_mean: float | None = None
     pre_edge_latency_p50: float | None = None
     pre_edge_latency_p95: float | None = None
+    pre_edge_latency_p99: float | None = None
+    pre_edge_latency_max: float | None = None
     delivery_time_mean: float | None = None
     delivery_time_p50: float | None = None
     delivery_time_p95: float | None = None
+    delivery_time_p99: float | None = None
+    delivery_time_max: float | None = None
 
 
 class AnomalyFinding(BaseModel):
@@ -338,9 +342,13 @@ class AggregationRecord(Base):
     pre_edge_latency_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
     pre_edge_latency_p50: Mapped[float | None] = mapped_column(Float, nullable=True)
     pre_edge_latency_p95: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pre_edge_latency_p99: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pre_edge_latency_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     delivery_time_mean: Mapped[float | None] = mapped_column(Float, nullable=True)
     delivery_time_p50: Mapped[float | None] = mapped_column(Float, nullable=True)
     delivery_time_p95: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delivery_time_p99: Mapped[float | None] = mapped_column(Float, nullable=True)
+    delivery_time_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -472,6 +480,18 @@ class InvestigationHypothesisRecord(Base):
     topic_title: Mapped[str] = mapped_column(String(256))
     statement: Mapped[str] = mapped_column(Text)
     reasoning: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class InvestigationReportRecord(Base):
+    __tablename__ = "investigation_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(64), index=True)
+    report_json: Mapped[str] = mapped_column(Text, default="")
+    report_markdown: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

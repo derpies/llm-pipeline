@@ -53,6 +53,7 @@ class InvestigationCycleState(TypedDict, total=False):
     documents: Annotated[list[GeneratedDocument], operator.add]
     strategies: Annotated[list[AnalyticalStrategy], operator.add]
     checkpoint_digest: str
+    report: Any  # InvestigationReport from report_builder
 
 
 class InvestigatorState(MessagesState):

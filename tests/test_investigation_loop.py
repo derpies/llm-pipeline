@@ -532,6 +532,53 @@ class TestInvestigationLoopIntegration:
         assert "checkpoint_digest" in result
         assert "CONFIRMED" in result["checkpoint_digest"]
 
+    def test_synthesize_produces_report(self):
+        """Synthesize node produces a report key in state with segment health."""
+        from llm_pipeline.agents.graph import _synthesize
+        from llm_pipeline.email_analytics.models import AggregationBucket
+
+        now = datetime.now(UTC)
+        report = self._make_mock_report()
+        # Add engagement_segment aggregations so segment_health is populated
+        report.aggregations = [
+            AggregationBucket(
+                time_window=now, dimension="engagement_segment",
+                dimension_value="VH", total=100, delivered=95,
+                bounced=3, deferred=2, complained=0,
+                delivery_rate=0.95, bounce_rate=0.03,
+                deferral_rate=0.02, complaint_rate=0.0,
+            ),
+        ]
+
+        state = {
+            "ml_report": report,
+            "run_id": "test-run",
+            "findings": [
+                Finding(
+                    topic_title="T1",
+                    statement="Confirmed thing",
+                    status=FindingStatus.CONFIRMED,
+                    evidence=["ev1"],
+                    created_at=now,
+                ),
+            ],
+            "hypotheses": [
+                Hypothesis(
+                    topic_title="T1", statement="Maybe X",
+                    reasoning="Because Y", created_at=now,
+                ),
+            ],
+            "digest_lines": ["[plan] Created 1 topic"],
+        }
+
+        result = _synthesize(state)
+        assert "report" in result
+        inv_report = result["report"]
+        assert len(inv_report.structured.segment_health) == 1
+        assert inv_report.structured.segment_health[0].segment == "VH"
+        assert len(inv_report.structured.confirmed_issues) == 1
+        assert len(inv_report.notes.hypotheses) == 1
+
     def test_circuit_breaker_stops_iteration(self):
         """Circuit breaker stops the loop even when LLM wants more investigation."""
         from llm_pipeline.agents.graph import build_investigation_graph

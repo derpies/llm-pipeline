@@ -177,14 +177,55 @@ def _route_after_evaluate(
     return sends
 
 
-def _synthesize_placeholder(state: InvestigationCycleState) -> dict:
-    """Placeholder for the synthesizer agent (Phase B).
+def _synthesize(state: InvestigationCycleState) -> dict:
+    """Build structured investigation report from ML data and findings.
 
-    For now, just pass through — the checkpoint will contain the findings.
+    Deterministic assembly — no LLM calls. Produces a fixed-schema
+    InvestigationReport (Document 1 + Document 2).
     """
+    from llm_pipeline.agents.report_builder import assemble_full_report
+
+    ml_report = state.get("ml_report")
+    run_id = state.get("run_id", "")
     findings = state.get("findings", [])
+    hypotheses = state.get("hypotheses", [])
+    digest_lines = state.get("digest_lines", [])
+
+    if ml_report is None:
+        logger.warning("synthesize: no ml_report in state, skipping report assembly")
+        return {
+            "digest_lines": [
+                f"[synthesize] No ML report available; {len(findings)} findings ready"
+            ],
+        }
+
+    report = assemble_full_report(
+        run_id=run_id,
+        ml_run_id=ml_report.run_id,
+        ml_report=ml_report,
+        findings=findings,
+        hypotheses=hypotheses,
+        digest_lines=digest_lines,
+    )
+
+    logger.info(
+        "synthesize completed run_id=%s segments=%d issues=%d trends=%d",
+        run_id,
+        len(report.structured.segment_health),
+        len(report.structured.confirmed_issues),
+        report.structured.trend_summary.degrading_count
+        + report.structured.trend_summary.improving_count
+        + report.structured.trend_summary.stable_count,
+    )
+
     return {
-        "digest_lines": [f"[synthesize] Placeholder: {len(findings)} findings ready for synthesis"],
+        "report": report,
+        "digest_lines": [
+            f"[synthesize] Report assembled: "
+            f"{len(report.structured.segment_health)} segments, "
+            f"{len(report.structured.confirmed_issues)} confirmed issues, "
+            f"{len(report.notes.hypotheses)} hypotheses"
+        ],
     }
 
 
@@ -196,7 +237,7 @@ def build_investigation_graph():
     graph.add_node("orchestrator_plan", orchestrator_plan)
     graph.add_node("investigate_topic", _investigate_topic)
     graph.add_node("orchestrator_evaluate", orchestrator_evaluate)
-    graph.add_node("synthesize", _synthesize_placeholder)
+    graph.add_node("synthesize", _synthesize)
     graph.add_node("orchestrator_checkpoint", orchestrator_checkpoint)
 
     # Edges

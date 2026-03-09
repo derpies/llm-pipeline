@@ -73,6 +73,11 @@ def _migrate_add_columns(engine) -> None:
         # Investigation finding quality gate columns
         "ALTER TABLE investigation_findings ADD COLUMN IF NOT EXISTS is_fallback BOOLEAN DEFAULT FALSE",
         "ALTER TABLE investigation_findings ADD COLUMN IF NOT EXISTS quality_warnings TEXT DEFAULT '[]'",
+        # Latency p99/max columns on aggregations
+        "ALTER TABLE email_aggregations ADD COLUMN IF NOT EXISTS pre_edge_latency_p99 FLOAT",
+        "ALTER TABLE email_aggregations ADD COLUMN IF NOT EXISTS pre_edge_latency_max FLOAT",
+        "ALTER TABLE email_aggregations ADD COLUMN IF NOT EXISTS delivery_time_p99 FLOAT",
+        "ALTER TABLE email_aggregations ADD COLUMN IF NOT EXISTS delivery_time_max FLOAT",
     ]
 
     with engine.connect() as conn:
@@ -123,9 +128,13 @@ def store_results(report: AnalysisReport) -> None:
                     pre_edge_latency_mean=agg.pre_edge_latency_mean,
                     pre_edge_latency_p50=agg.pre_edge_latency_p50,
                     pre_edge_latency_p95=agg.pre_edge_latency_p95,
+                    pre_edge_latency_p99=agg.pre_edge_latency_p99,
+                    pre_edge_latency_max=agg.pre_edge_latency_max,
                     delivery_time_mean=agg.delivery_time_mean,
                     delivery_time_p50=agg.delivery_time_p50,
                     delivery_time_p95=agg.delivery_time_p95,
+                    delivery_time_p99=agg.delivery_time_p99,
+                    delivery_time_max=agg.delivery_time_max,
                 )
             )
 
@@ -217,9 +226,13 @@ def load_historical_aggregations(
                 pre_edge_latency_mean=getattr(row, "pre_edge_latency_mean", None),
                 pre_edge_latency_p50=getattr(row, "pre_edge_latency_p50", None),
                 pre_edge_latency_p95=getattr(row, "pre_edge_latency_p95", None),
+                pre_edge_latency_p99=getattr(row, "pre_edge_latency_p99", None),
+                pre_edge_latency_max=getattr(row, "pre_edge_latency_max", None),
                 delivery_time_mean=getattr(row, "delivery_time_mean", None),
                 delivery_time_p50=getattr(row, "delivery_time_p50", None),
                 delivery_time_p95=getattr(row, "delivery_time_p95", None),
+                delivery_time_p99=getattr(row, "delivery_time_p99", None),
+                delivery_time_max=getattr(row, "delivery_time_max", None),
             )
             for row in rows
         ]
@@ -269,9 +282,13 @@ def load_report(run_id: str) -> AnalysisReport | None:
                 pre_edge_latency_mean=getattr(r, "pre_edge_latency_mean", None),
                 pre_edge_latency_p50=getattr(r, "pre_edge_latency_p50", None),
                 pre_edge_latency_p95=getattr(r, "pre_edge_latency_p95", None),
+                pre_edge_latency_p99=getattr(r, "pre_edge_latency_p99", None),
+                pre_edge_latency_max=getattr(r, "pre_edge_latency_max", None),
                 delivery_time_mean=getattr(r, "delivery_time_mean", None),
                 delivery_time_p50=getattr(r, "delivery_time_p50", None),
                 delivery_time_p95=getattr(r, "delivery_time_p95", None),
+                delivery_time_p99=getattr(r, "delivery_time_p99", None),
+                delivery_time_max=getattr(r, "delivery_time_max", None),
             )
             for r in agg_rows
         ]

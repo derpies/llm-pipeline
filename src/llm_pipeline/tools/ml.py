@@ -54,6 +54,9 @@ def get_aggregations(
         )
         return tool_result(ToolStatus.EMPTY, f"No aggregation data found for run_id={run_id}")
 
+    def _round_or_none(val, digits=4):
+        return round(val, digits) if val is not None else None
+
     results = []
     for r in rows:
         results.append(
@@ -68,6 +71,16 @@ def get_aggregations(
                 "delivery_rate": round(r.delivery_rate, 4),
                 "bounce_rate": round(r.bounce_rate, 4),
                 "deferral_rate": round(r.deferral_rate, 4),
+                "pre_edge_latency_mean": _round_or_none(getattr(r, "pre_edge_latency_mean", None)),
+                "pre_edge_latency_p50": _round_or_none(getattr(r, "pre_edge_latency_p50", None)),
+                "pre_edge_latency_p95": _round_or_none(getattr(r, "pre_edge_latency_p95", None)),
+                "pre_edge_latency_p99": _round_or_none(getattr(r, "pre_edge_latency_p99", None)),
+                "pre_edge_latency_max": _round_or_none(getattr(r, "pre_edge_latency_max", None)),
+                "delivery_time_mean": _round_or_none(getattr(r, "delivery_time_mean", None)),
+                "delivery_time_p50": _round_or_none(getattr(r, "delivery_time_p50", None)),
+                "delivery_time_p95": _round_or_none(getattr(r, "delivery_time_p95", None)),
+                "delivery_time_p99": _round_or_none(getattr(r, "delivery_time_p99", None)),
+                "delivery_time_max": _round_or_none(getattr(r, "delivery_time_max", None)),
             }
         )
     logger.debug(
@@ -370,6 +383,16 @@ def compare_dimensions(
         "bounce_rate",
         "deferral_rate",
         "complaint_rate",
+        "pre_edge_latency_mean",
+        "pre_edge_latency_p50",
+        "pre_edge_latency_p95",
+        "pre_edge_latency_p99",
+        "pre_edge_latency_max",
+        "delivery_time_mean",
+        "delivery_time_p50",
+        "delivery_time_p95",
+        "delivery_time_p99",
+        "delivery_time_max",
     }
     if metric not in valid_metrics:
         return tool_result(

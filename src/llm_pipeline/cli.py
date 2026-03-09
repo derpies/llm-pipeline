@@ -321,6 +321,24 @@ def investigate(
     except Exception as e:
         typer.echo(f"Warning: failed to write markdown report: {e}")
 
+    # Write structured report
+    inv_report = result.get("report")
+    if inv_report:
+        try:
+            from llm_pipeline.agents.storage import (
+                store_investigation_report,
+                write_investigation_report_files,
+            )
+
+            store_investigation_report(run_id=report.run_id, report=inv_report)
+            json_path, rpt_md_path = write_investigation_report_files(
+                run_id=report.run_id, report=inv_report
+            )
+            typer.echo(f"Structured report: {json_path}")
+            typer.echo(f"Structured report: {rpt_md_path}")
+        except Exception as e:
+            typer.echo(f"Warning: failed to write structured report: {e}")
+
     # Store to knowledge hierarchy
     try:
         from llm_pipeline.knowledge.store import store_investigation_to_knowledge
