@@ -57,6 +57,8 @@ class Settings(BaseSettings):
 
     # Investigation
     investigator_use_knowledge_store: bool = True
+    investigator_max_llm_calls: int = 15
+    investigator_max_consecutive_errors: int = 3
 
     # Summarization
     summarization_top_dimensions: int = 10

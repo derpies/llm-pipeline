@@ -8,6 +8,8 @@ import time
 
 from langchain_core.tools import tool
 
+from llm_pipeline.tools.result import ToolStatus, tool_result
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,7 +52,7 @@ def get_aggregations(
             run_id,
             time.monotonic() - t0,
         )
-        return f"No aggregation data found for run_id={run_id}"
+        return tool_result(ToolStatus.EMPTY, f"No aggregation data found for run_id={run_id}")
 
     results = []
     for r in rows:
@@ -74,7 +76,7 @@ def get_aggregations(
         len(results),
         time.monotonic() - t0,
     )
-    return json.dumps(results, indent=2)
+    return tool_result(ToolStatus.OK, json.dumps(results, indent=2))
 
 
 @tool
@@ -116,7 +118,7 @@ def get_anomalies(
             run_id,
             time.monotonic() - t0,
         )
-        return f"No anomalies found for run_id={run_id}"
+        return tool_result(ToolStatus.EMPTY, f"No anomalies found for run_id={run_id}")
 
     results = []
     for r in rows:
@@ -138,7 +140,7 @@ def get_anomalies(
         len(results),
         time.monotonic() - t0,
     )
-    return json.dumps(results, indent=2)
+    return tool_result(ToolStatus.OK, json.dumps(results, indent=2))
 
 
 @tool
@@ -180,7 +182,7 @@ def get_trends(
             run_id,
             time.monotonic() - t0,
         )
-        return f"No trends found for run_id={run_id}"
+        return tool_result(ToolStatus.EMPTY, f"No trends found for run_id={run_id}")
 
     results = []
     for r in rows:
@@ -203,7 +205,7 @@ def get_trends(
         len(results),
         time.monotonic() - t0,
     )
-    return json.dumps(results, indent=2)
+    return tool_result(ToolStatus.OK, json.dumps(results, indent=2))
 
 
 @tool
@@ -226,7 +228,7 @@ def get_ml_report_summary(run_id: str) -> str:
             run_id,
             time.monotonic() - t0,
         )
-        return f"No report found for run_id={run_id}"
+        return tool_result(ToolStatus.EMPTY, f"No report found for run_id={run_id}")
 
     summary = {
         "run_id": report.run_id,
@@ -262,7 +264,7 @@ def get_ml_report_summary(run_id: str) -> str:
         run_id,
         time.monotonic() - t0,
     )
-    return json.dumps(summary, indent=2)
+    return tool_result(ToolStatus.OK, json.dumps(summary, indent=2))
 
 
 @tool
@@ -311,7 +313,9 @@ def get_data_completeness(
             run_id,
             time.monotonic() - t0,
         )
-        return f"No data completeness records found for run_id={run_id}"
+        return tool_result(
+            ToolStatus.EMPTY, f"No data completeness records found for run_id={run_id}"
+        )
 
     results = []
     for r in rows:
@@ -332,7 +336,7 @@ def get_data_completeness(
         len(results),
         time.monotonic() - t0,
     )
-    return json.dumps(results, indent=2)
+    return tool_result(ToolStatus.OK, json.dumps(results, indent=2))
 
 
 @tool
@@ -368,7 +372,10 @@ def compare_dimensions(
         "complaint_rate",
     }
     if metric not in valid_metrics:
-        return f"Invalid metric '{metric}'. Must be one of: {', '.join(sorted(valid_metrics))}"
+        return tool_result(
+            ToolStatus.ERROR,
+            f"Invalid metric '{metric}'. Must be one of: {', '.join(sorted(valid_metrics))}",
+        )
 
     engine = get_engine()
     with Session(engine) as session:
@@ -386,7 +393,10 @@ def compare_dimensions(
             run_id,
             time.monotonic() - t0,
         )
-        return f"No aggregation data found for run_id={run_id}, dimension={dimension}"
+        return tool_result(
+            ToolStatus.EMPTY,
+            f"No aggregation data found for run_id={run_id}, dimension={dimension}",
+        )
 
     result: dict[str, list[dict]] = {}
     for r in rows:
@@ -406,7 +416,7 @@ def compare_dimensions(
         len(result),
         time.monotonic() - t0,
     )
-    return json.dumps(result, indent=2)
+    return tool_result(ToolStatus.OK, json.dumps(result, indent=2))
 
 
 # Tool registries per agent role

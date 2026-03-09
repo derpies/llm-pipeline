@@ -18,6 +18,7 @@ from llm_pipeline.models.token_tracker import get_tracker
 from llm_pipeline.tools.common import get_current_datetime
 from llm_pipeline.tools.ml import INVESTIGATOR_ML_TOOLS
 from llm_pipeline.tools.reporting import REPORTING_TOOLS
+from llm_pipeline.tools.result import ToolStatus, parse_tool_status
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +39,80 @@ def _get_investigator_tools() -> list:
     return tools
 
 
+def _count_consecutive_non_ok(messages: list) -> int:
+    """Count consecutive non-OK ToolMessages from the tail of the history.
+
+    Uses the structured ``[OK]``/``[EMPTY]``/``[ERROR]`` prefix convention.
+    Unprefixed messages (backward compat) are treated as OK and stop the count.
+    """
+    from langchain_core.messages import ToolMessage
+
+    count = 0
+    for msg in reversed(messages):
+        if not isinstance(msg, ToolMessage):
+            break
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        status = parse_tool_status(content)
+        if status is None or status == ToolStatus.OK:
+            break
+        count += 1
+    return count
+
+
 def _should_continue(state: InvestigatorState) -> str:
-    """Route: continue tool loop or finish."""
+    """Route: continue tool loop or finish.
+
+    Checks three signals before allowing another LLM call:
+    1. Max LLM round-trips (hard cap)
+    2. Consecutive tool errors (catches fabricated parameters)
+    3. Global spend budget (stop early rather than waiting for orchestrator)
+    """
+    from langchain_core.messages import AIMessage
+
     last = state["messages"][-1]
-    if hasattr(last, "tool_calls") and last.tool_calls:
-        return "tools"
-    return END
+    if not (hasattr(last, "tool_calls") and last.tool_calls):
+        return END
+
+    messages = state["messages"]
+    topic_title = state["topic"].title if state.get("topic") else "unknown"
+
+    # 1. Max LLM calls
+    llm_calls = sum(1 for m in messages if isinstance(m, AIMessage))
+    if llm_calls >= settings.investigator_max_llm_calls:
+        logger.warning(
+            "investigator circuit breaker: max_llm_calls reached "
+            "topic=%s calls=%d limit=%d",
+            topic_title,
+            llm_calls,
+            settings.investigator_max_llm_calls,
+        )
+        return END
+
+    # 2. Consecutive tool errors
+    consec_errors = _count_consecutive_non_ok(messages)
+    if consec_errors >= settings.investigator_max_consecutive_errors:
+        logger.warning(
+            "investigator circuit breaker: consecutive_errors reached "
+            "topic=%s errors=%d limit=%d",
+            topic_title,
+            consec_errors,
+            settings.investigator_max_consecutive_errors,
+        )
+        return END
+
+    # 3. Global spend check
+    tracker = get_tracker()
+    if tracker.total_cost_usd >= settings.circuit_breaker_max_spend_usd:
+        logger.warning(
+            "investigator circuit breaker: global spend exceeded "
+            "topic=%s spent=%.2f limit=%.2f",
+            topic_title,
+            tracker.total_cost_usd,
+            settings.circuit_breaker_max_spend_usd,
+        )
+        return END
+
+    return "tools"
 
 
 def _call_investigator(state: InvestigatorState) -> dict:
@@ -242,6 +311,21 @@ def _extract_results(state: InvestigatorState) -> dict:
         )
         findings.append(finding)
         digest_lines.append(f"[finding:inconclusive] {topic.title}: no reporting tools called")
+
+    # Surface per-investigator tool health to orchestrator
+    from langchain_core.messages import ToolMessage
+
+    error_tool_count = sum(
+        1
+        for msg in state["messages"]
+        if isinstance(msg, ToolMessage)
+        and parse_tool_status(msg.content if isinstance(msg.content, str) else "")
+        in (ToolStatus.ERROR, ToolStatus.EMPTY)
+    )
+    if error_tool_count:
+        digest_lines.append(
+            f"[tool_errors] {topic.title}: {error_tool_count} tool calls returned EMPTY/ERROR"
+        )
 
     # Count total tool calls for diagnostics
     total_tool_calls = sum(

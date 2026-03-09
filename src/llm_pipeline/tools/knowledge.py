@@ -6,6 +6,7 @@ import time
 from langchain_core.tools import tool
 
 from llm_pipeline.knowledge.models import KnowledgeScope
+from llm_pipeline.tools.result import ToolStatus, tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ def retrieve_knowledge(
         logger.debug(
             "tool retrieve_knowledge returned results=0 elapsed_s=%.2f", time.monotonic() - t0
         )
-        return "No relevant knowledge found in the knowledge store."
+        return tool_result(ToolStatus.EMPTY, "No relevant knowledge found in the knowledge store.")
 
     lines = []
     for i, r in enumerate(results, 1):
@@ -57,4 +58,4 @@ def retrieve_knowledge(
         len(results),
         time.monotonic() - t0,
     )
-    return "\n\n".join(lines)
+    return tool_result(ToolStatus.OK, "\n\n".join(lines))

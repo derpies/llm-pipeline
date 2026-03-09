@@ -675,3 +675,170 @@ class TestInvestigatorToolToggle:
             base_names = {t.name for t in INVESTIGATOR_BASE_TOOLS}
             tool_names = {t.name for t in tools}
             assert base_names <= tool_names
+
+
+# ---------------------------------------------------------------------------
+# _count_consecutive_non_ok tests
+# ---------------------------------------------------------------------------
+
+class TestCountConsecutiveNonOk:
+    """Tests for investigator._count_consecutive_non_ok."""
+
+    def test_counts_consecutive_empty_results(self):
+        from llm_pipeline.agents.investigator import _count_consecutive_non_ok
+
+        messages = [
+            HumanMessage(content="brief"),
+            AIMessage(content="", tool_calls=[{"id": "c1", "name": "t", "args": {}}]),
+            _tool_msg("c1", "[EMPTY] No data found"),
+            AIMessage(content="", tool_calls=[{"id": "c2", "name": "t", "args": {}}]),
+            _tool_msg("c2", "[EMPTY] No anomalies found"),
+        ]
+        assert _count_consecutive_non_ok(messages) == 1
+
+    def test_counts_consecutive_error_results(self):
+        from llm_pipeline.agents.investigator import _count_consecutive_non_ok
+
+        messages = [
+            AIMessage(content="", tool_calls=[
+                {"id": "c1", "name": "t", "args": {}},
+                {"id": "c2", "name": "t", "args": {}},
+            ]),
+            _tool_msg("c1", "[ERROR] Invalid metric"),
+            _tool_msg("c2", "[ERROR] Missing parameter"),
+        ]
+        assert _count_consecutive_non_ok(messages) == 2
+
+    def test_mixed_empty_and_error(self):
+        from llm_pipeline.agents.investigator import _count_consecutive_non_ok
+
+        messages = [
+            AIMessage(content="", tool_calls=[
+                {"id": "c1", "name": "t", "args": {}},
+                {"id": "c2", "name": "t", "args": {}},
+            ]),
+            _tool_msg("c1", "[EMPTY] No data"),
+            _tool_msg("c2", "[ERROR] Bad param"),
+        ]
+        assert _count_consecutive_non_ok(messages) == 2
+
+    def test_ok_breaks_the_streak(self):
+        from llm_pipeline.agents.investigator import _count_consecutive_non_ok
+
+        messages = [
+            AIMessage(content="", tool_calls=[
+                {"id": "c1", "name": "t", "args": {}},
+                {"id": "c2", "name": "t", "args": {}},
+                {"id": "c3", "name": "t", "args": {}},
+            ]),
+            _tool_msg("c1", "[EMPTY] No data"),
+            _tool_msg("c2", "[OK] {\"result\": 1}"),
+            _tool_msg("c3", "[EMPTY] No data"),
+        ]
+        # Only the last one counts — c2 (OK) breaks the streak
+        assert _count_consecutive_non_ok(messages) == 1
+
+    def test_unprefixed_messages_treated_as_ok(self):
+        from llm_pipeline.agents.investigator import _count_consecutive_non_ok
+
+        messages = [
+            AIMessage(content="", tool_calls=[
+                {"id": "c1", "name": "t", "args": {}},
+                {"id": "c2", "name": "t", "args": {}},
+            ]),
+            _tool_msg("c1", "ok"),  # no prefix — backward compat
+            _tool_msg("c2", "[EMPTY] No data"),
+        ]
+        # Only c2 counts; c1 (unprefixed) treated as OK, breaks the streak
+        assert _count_consecutive_non_ok(messages) == 1
+
+    def test_zero_when_all_ok(self):
+        from llm_pipeline.agents.investigator import _count_consecutive_non_ok
+
+        messages = [
+            AIMessage(content="", tool_calls=[
+                {"id": "c1", "name": "t", "args": {}},
+            ]),
+            _tool_msg("c1", "[OK] Some data"),
+        ]
+        assert _count_consecutive_non_ok(messages) == 0
+
+    def test_zero_when_no_tool_messages(self):
+        from llm_pipeline.agents.investigator import _count_consecutive_non_ok
+
+        messages = [
+            HumanMessage(content="brief"),
+            AIMessage(content="thinking..."),
+        ]
+        assert _count_consecutive_non_ok(messages) == 0
+
+
+# ---------------------------------------------------------------------------
+# _extract_results tool_errors digest tests
+# ---------------------------------------------------------------------------
+
+class TestExtractResultsToolErrors:
+    """Tests for tool_errors digest line in _extract_results."""
+
+    def test_digest_includes_tool_errors_count(self):
+        from llm_pipeline.agents.investigator import _extract_results
+
+        msg = _ai_msg_with_tool_calls([
+            {
+                "id": "call_1",
+                "name": "get_aggregations",
+                "args": {"run_id": "r1"},
+            },
+            {
+                "id": "call_2",
+                "name": "report_finding",
+                "args": {"statement": "Found it", "status": "confirmed"},
+            },
+        ])
+
+        state = {
+            "topic": _make_topic(),
+            "run_id": "run-001",
+            "messages": [
+                HumanMessage(content="brief"),
+                msg,
+                _tool_msg("call_1", "[EMPTY] No aggregation data found"),
+                _tool_msg("call_2", "[OK] Finding recorded"),
+            ],
+            "findings": [],
+            "hypotheses": [],
+            "digest_lines": [],
+            "prior_context": "",
+        }
+
+        result = _extract_results(state)
+        assert any("[tool_errors]" in d for d in result["digest_lines"])
+        assert any("1 tool calls returned EMPTY/ERROR" in d for d in result["digest_lines"])
+
+    def test_no_tool_errors_digest_when_all_ok(self):
+        from llm_pipeline.agents.investigator import _extract_results
+
+        msg = _ai_msg_with_tool_calls([
+            {
+                "id": "call_1",
+                "name": "report_finding",
+                "args": {"statement": "Found it", "status": "confirmed"},
+            },
+        ])
+
+        state = {
+            "topic": _make_topic(),
+            "run_id": "run-001",
+            "messages": [
+                HumanMessage(content="brief"),
+                msg,
+                _tool_msg("call_1", "[OK] Finding recorded"),
+            ],
+            "findings": [],
+            "hypotheses": [],
+            "digest_lines": [],
+            "prior_context": "",
+        }
+
+        result = _extract_results(state)
+        assert not any("[tool_errors]" in d for d in result["digest_lines"])

@@ -6,6 +6,8 @@ import logging
 
 from langchain_core.tools import tool
 
+from llm_pipeline.tools.result import ToolStatus, tool_result
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,9 +29,10 @@ def report_finding(
         metrics_cited: JSON object of metric name to value (e.g. '{"delivery_rate": 0.88}').
     """
     logger.info("Finding reported: [%s] %s", status, statement)
-    return (
+    return tool_result(
+        ToolStatus.OK,
         f"Finding recorded: [{status}] {statement} "
-        f"(evidence={evidence}, metrics={metrics_cited})"
+        f"(evidence={evidence}, metrics={metrics_cited})",
     )
 
 
@@ -47,7 +50,7 @@ def report_hypothesis(
         reasoning: Why you think this — what evidence or pattern led you here.
     """
     logger.info("Hypothesis reported: %s", statement)
-    return f"Hypothesis recorded: {statement} (reasoning: {reasoning})"
+    return tool_result(ToolStatus.OK, f"Hypothesis recorded: {statement} (reasoning: {reasoning})")
 
 
 REPORTING_TOOLS = [report_finding, report_hypothesis]
