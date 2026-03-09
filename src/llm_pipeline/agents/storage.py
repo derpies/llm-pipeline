@@ -158,6 +158,36 @@ def store_investigation_results(
         )
 
 
+def list_investigations(run_id: str | None = None) -> list[dict]:
+    """List investigation runs, optionally filtered by run_id.
+
+    Returns list of dicts sorted by created_at desc.
+    """
+    engine = get_engine()
+
+    with Session(engine) as session:
+        stmt = select(InvestigationRunRecord)
+        if run_id is not None:
+            stmt = stmt.where(InvestigationRunRecord.run_id == run_id)
+        stmt = stmt.order_by(InvestigationRunRecord.created_at.desc())
+        rows = session.execute(stmt).scalars().all()
+
+        return [
+            {
+                "run_id": r.run_id,
+                "label": getattr(r, "label", ""),
+                "status": getattr(r, "status", "success"),
+                "is_dry_run": getattr(r, "is_dry_run", False),
+                "ml_run_id": getattr(r, "ml_run_id", None),
+                "finding_count": r.finding_count,
+                "hypothesis_count": r.hypothesis_count,
+                "iteration_count": r.iteration_count,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ]
+
+
 def load_investigation(run_id: str, *, label: str | None = None) -> dict | None:
     """Load a complete investigation result from Postgres.
 
@@ -443,6 +473,7 @@ def write_investigation_report_files(
     run_id: str,
     report: InvestigationReport,
     output_dir: Path | None = None,
+    label: str = "",
 ) -> tuple[Path, Path]:
     """Write report JSON and markdown files to disk.
 
@@ -453,8 +484,9 @@ def write_investigation_report_files(
     out = output_dir or OUTPUT_DIR
     out.mkdir(parents=True, exist_ok=True)
 
-    json_path = out / f"{run_id}-report.json"
-    md_path = out / f"{run_id}-report.md"
+    prefix = f"{run_id}-{label}" if label else run_id
+    json_path = out / f"{prefix}-report.json"
+    md_path = out / f"{prefix}-report.md"
 
     json_path.write_text(render_json(report))
     md_path.write_text(render_markdown(report))

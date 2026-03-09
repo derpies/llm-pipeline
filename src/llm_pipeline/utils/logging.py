@@ -10,12 +10,14 @@ import structlog
 from llm_pipeline.config import settings
 
 
-def setup_logging(run_id: str = "") -> None:
+def setup_logging(command: str = "", run_id: str = "") -> None:
     """Configure structlog for the application.
 
     Logs to stderr (human-readable) and to a persistent JSON file
     in settings.log_dir. File logs are always JSON and always DEBUG
     level for full traceability.
+
+    Filename pattern: {timestamp}-{command}[-{run_id}].log
     """
     shared_processors: list[structlog.types.Processor] = [
         structlog.stdlib.add_log_level,
@@ -60,7 +62,12 @@ def setup_logging(run_id: str = "") -> None:
     log_dir = Path(settings.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    filename = f"{ts}-{run_id}.log" if run_id else f"{ts}.log"
+    parts = [ts]
+    if command:
+        parts.append(command)
+    if run_id:
+        parts.append(run_id)
+    filename = "-".join(parts) + ".log"
     file_formatter = structlog.stdlib.ProcessorFormatter(
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,

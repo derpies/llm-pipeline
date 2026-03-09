@@ -26,7 +26,7 @@ def _discover(state: EmailAnalyticsState) -> dict:
 
     input_path = state["input_path"]
     file_paths = discover_files(input_path)
-    run_id = str(uuid.uuid4())[:12]
+    run_id = state.get("run_id") or str(uuid.uuid4())
     logger.info("Discovered %d files at %s (run_id=%s)", len(file_paths), input_path, run_id)
     return {"file_paths": file_paths, "run_id": run_id}
 

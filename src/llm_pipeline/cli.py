@@ -23,15 +23,15 @@ def main(ctx: typer.Context) -> None:
 @app.command()
 def chat() -> None:
     """Start an interactive chat session with the agent."""
-    setup_logging()
+    run_id = str(uuid.uuid4())
+    setup_logging(command="chat", run_id=run_id)
 
     # Lazy import so startup is fast and config errors surface at use-time
     from llm_pipeline.agents.chat import build_chat_graph
 
     agent = build_chat_graph()
 
-    thread_id = str(uuid.uuid4())
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {"configurable": {"thread_id": run_id}}
 
     typer.echo("llm-pipeline chat (type 'exit' or Ctrl+C to quit)\n")
 
@@ -59,7 +59,8 @@ def ingest(
     ] = False,
 ) -> None:
     """Ingest documents into the knowledge base."""
-    setup_logging()
+    run_id = str(uuid.uuid4())
+    setup_logging(command="ingest", run_id=run_id)
 
     from llm_pipeline.ingestion.graph import build_ingestion_graph
 
@@ -118,13 +119,18 @@ def analyze_email(
     ] = False,
 ) -> None:
     """Analyze email delivery data — aggregate, detect anomalies, find trends."""
-    setup_logging()
+    run_id = str(uuid.uuid4())
+    setup_logging(command="analyze_email", run_id=run_id)
     reset_tracker()
 
     from llm_pipeline.email_analytics.graph import build_email_analytics_graph
 
     graph = build_email_analytics_graph()
-    result = graph.invoke({"input_path": str(path.resolve()), "json_format": json_format})
+    result = graph.invoke({
+        "input_path": str(path.resolve()),
+        "json_format": json_format,
+        "run_id": run_id,
+    })
 
     report = result.get("report")
     if not report:
@@ -180,9 +186,9 @@ def investigate(
             help="JSON format: 'ndjson' or 'concatenated'",
         ),
     ] = "ndjson",
-    run_id: Annotated[
+    ml_run_id: Annotated[
         str | None,
-        typer.Option("--run-id", "-r", help="Use a previous ML run instead of re-analyzing"),
+        typer.Option("--ml-run-id", "-r", help="Reuse a previous ML run instead of re-analyzing"),
     ] = None,
     no_knowledge: Annotated[
         bool,
@@ -198,7 +204,8 @@ def investigate(
     ] = False,
 ) -> None:
     """Run the investigation cycle — ML analysis → agent investigation → findings."""
-    setup_logging(run_id=run_id or "")
+    run_id = str(uuid.uuid4())
+    setup_logging(command="investigate", run_id=run_id)
     reset_tracker()
 
     if dry_run:
@@ -218,12 +225,12 @@ def investigate(
     init_db()
 
     # Either load existing report or run ML analysis first
-    if run_id:
-        report = load_report(run_id)
+    if ml_run_id:
+        report = load_report(ml_run_id)
         if not report:
-            typer.echo(f"No analysis run found with run_id={run_id}")
+            typer.echo(f"No analysis run found with ml_run_id={ml_run_id}")
             raise typer.Exit(1)
-        typer.echo(f"Loaded existing report: {run_id}")
+        typer.echo(f"Loaded existing report: {ml_run_id}")
     else:
         from llm_pipeline.email_analytics.graph import build_email_analytics_graph
 
@@ -232,11 +239,13 @@ def investigate(
         ml_result = ml_graph.invoke({
             "input_path": str(path.resolve()),
             "json_format": json_format,
+            "run_id": run_id,
         })
         report = ml_result.get("report")
         if not report:
             typer.echo("ML analysis produced no report.")
             raise typer.Exit(1)
+        ml_run_id = run_id  # same execution produced both
         typer.echo(
             f"ML analysis complete: {len(report.anomalies)} anomalies, "
             f"{len(report.trends)} trends"
@@ -249,7 +258,7 @@ def investigate(
     graph = build_investigation_graph()
     result = graph.invoke({
         "ml_report": report,
-        "run_id": report.run_id,
+        "run_id": run_id,
     })
 
     # Print checkpoint digest
@@ -283,7 +292,7 @@ def investigate(
 
     try:
         store_investigation_results(
-            run_id=report.run_id,
+            run_id=run_id,
             findings=findings,
             hypotheses=hypotheses,
             checkpoint_digest=digest,
@@ -293,7 +302,7 @@ def investigate(
             label=label,
             status=run_status,
             is_dry_run=dry_run,
-            ml_run_id=report.run_id,
+            ml_run_id=ml_run_id,
         )
         typer.echo(
             f"\nPersisted [{run_status}]: {len(findings)} findings, "
@@ -305,7 +314,7 @@ def investigate(
     # Write human-readable markdown
     try:
         md_path = write_investigation_markdown(
-            run_id=report.run_id,
+            run_id=run_id,
             findings=findings,
             hypotheses=hypotheses,
             checkpoint_digest=digest,
@@ -330,9 +339,9 @@ def investigate(
                 write_investigation_report_files,
             )
 
-            store_investigation_report(run_id=report.run_id, report=inv_report)
+            store_investigation_report(run_id=run_id, report=inv_report)
             json_path, rpt_md_path = write_investigation_report_files(
-                run_id=report.run_id, report=inv_report
+                run_id=run_id, report=inv_report
             )
             typer.echo(f"Structured report: {json_path}")
             typer.echo(f"Structured report: {rpt_md_path}")
@@ -346,7 +355,7 @@ def investigate(
         counts = store_investigation_to_knowledge(
             findings=findings,
             hypotheses=hypotheses,
-            run_id=report.run_id,
+            run_id=run_id,
         )
         filtered = counts.get('filtered', 0)
         parts = [
@@ -367,7 +376,8 @@ def summarize(
     run_id: Annotated[str, typer.Argument(help="Run ID of a previous email analytics run")],
 ) -> None:
     """Generate plain-language documents from a previous email analytics run."""
-    setup_logging()
+    summarize_run_id = str(uuid.uuid4())
+    setup_logging(command="summarize", run_id=summarize_run_id)
     reset_tracker()
 
     from llm_pipeline.email_analytics.storage import init_db, load_report
@@ -417,7 +427,7 @@ def knowledge(
     top_k: Annotated[int, typer.Option("--top-k", "-k", help="Number of results")] = 10,
 ) -> None:
     """Search the knowledge store for findings, hypotheses, and truths."""
-    setup_logging()
+    setup_logging(command="knowledge")
 
     from llm_pipeline.knowledge.models import KnowledgeScope
     from llm_pipeline.knowledge.retrieval import retrieve_knowledge
@@ -447,7 +457,7 @@ def knowledge(
 @app.command()
 def knowledge_stats() -> None:
     """Show entry counts by tier, scope, and status in the knowledge store."""
-    setup_logging()
+    setup_logging(command="knowledge_stats")
 
     from llm_pipeline.knowledge.models import KnowledgeTier
     from llm_pipeline.knowledge.weaviate_schema import TIER_COLLECTIONS
@@ -486,7 +496,8 @@ def knowledge_reset(
     Does NOT touch the grounded tier. Use this to clear test/junk data and rebuild
     from a fresh investigation run.
     """
-    setup_logging()
+    reset_run_id = str(uuid.uuid4())
+    setup_logging(command="knowledge_reset", run_id=reset_run_id)
 
     from llm_pipeline.knowledge.models import KnowledgeTier
     from llm_pipeline.knowledge.weaviate_schema import TIER_COLLECTIONS
@@ -537,7 +548,8 @@ def import_grounded(
     chunk_overlap: Annotated[int, typer.Option("--chunk-overlap", help="Overlap between chunks")] = 200,
 ) -> None:
     """Import a grounding corpus directory into the Weaviate Grounded tier."""
-    setup_logging()
+    import_run_id = str(uuid.uuid4())
+    setup_logging(command="import_grounded", run_id=import_run_id)
 
     from llm_pipeline.knowledge.import_grounded import import_grounded_directory
 
@@ -566,7 +578,7 @@ def compare_runs(
     label_b: Annotated[str, typer.Option("--label-b", help="Label for run B")] = "",
 ) -> None:
     """Compare two investigation runs side-by-side."""
-    setup_logging()
+    setup_logging(command="compare_runs")
 
     from llm_pipeline.agents.storage import load_investigation
 
@@ -676,6 +688,141 @@ def _format_comparison(a: dict, b: dict) -> str:
     lines.append(f"  A={len(a['hypotheses']):3d}  B={len(b['hypotheses']):3d}")
 
     return "\n".join(lines)
+
+
+@app.command()
+def list_investigations(
+    run_id: Annotated[
+        str | None,
+        typer.Option("--run-id", "-r", help="Filter by run ID"),
+    ] = None,
+) -> None:
+    """List investigation runs with key metadata."""
+    setup_logging(command="list_investigations")
+
+    from llm_pipeline.agents.storage import list_investigations as _list_investigations
+    from llm_pipeline.email_analytics.storage import init_db
+
+    init_db()
+    runs = _list_investigations(run_id)
+
+    if not runs:
+        typer.echo("No investigation runs found.")
+        raise typer.Exit()
+
+    header = (
+        f"{'CREATED AT':<20s} {'RUN ID':<38s} {'LABEL':<16s} {'STATUS':<10s} "
+        f"{'F':>3s} {'H':>3s} {'ITER':>4s}"
+    )
+    typer.echo(header)
+    typer.echo("-" * 95)
+    for r in runs:
+        label = r["label"] or "-"
+        created = r["created_at"].strftime("%Y-%m-%d %H:%M:%S") if r["created_at"] else "-"
+        dry = " [DRY]" if r["is_dry_run"] else ""
+        typer.echo(
+            f"{created:<20s} {r['run_id']:<38s} {label:<16s} {r['status'] + dry:<10s} "
+            f"{r['finding_count']:>3d} {r['hypothesis_count']:>3d} "
+            f"{r['iteration_count']:>4d}"
+        )
+
+
+@app.command()
+def regenerate_report(
+    run_id: Annotated[str, typer.Argument(help="ML/investigation run ID")],
+    label: Annotated[
+        str,
+        typer.Option("--label", "-l", help="Regenerate report for a specific labeled run"),
+    ] = "",
+    all_labels: Annotated[
+        bool,
+        typer.Option("--all-labels", help="Regenerate for ALL investigations with this run_id"),
+    ] = False,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option("--output-dir", "-o", help="Output dir (default output/investigations/)"),
+    ] = None,
+) -> None:
+    """Regenerate structured reports from stored investigation + ML data (no LLM calls)."""
+    regen_run_id = str(uuid.uuid4())
+    setup_logging(command="regenerate_report", run_id=regen_run_id)
+
+    from llm_pipeline.agents.report_builder import assemble_full_report
+    from llm_pipeline.agents.storage import (
+        list_investigations as _list_investigations,
+    )
+    from llm_pipeline.agents.storage import (
+        load_investigation,
+        store_investigation_report,
+        write_investigation_report_files,
+    )
+    from llm_pipeline.email_analytics.storage import init_db, load_report
+
+    init_db()
+
+    # Determine which investigations to process
+    if all_labels:
+        investigations = []
+        for inv_meta in _list_investigations(run_id):
+            inv = load_investigation(run_id, label=inv_meta["label"] or None)
+            if inv:
+                investigations.append(inv)
+        if not investigations:
+            typer.echo(f"No investigations found for run_id={run_id}")
+            raise typer.Exit(1)
+    else:
+        inv = load_investigation(run_id, label=label or None)
+        if not inv:
+            label_msg = f" label={label}" if label else ""
+            typer.echo(f"No investigation found for run_id={run_id}{label_msg}")
+            raise typer.Exit(1)
+        investigations = [inv]
+
+    generated = 0
+    for inv in investigations:
+        inv_label = inv.get("label", "")
+        ml_run_id = inv.get("ml_run_id") or run_id
+
+        # Load ML report
+        ml_report = load_report(ml_run_id)
+        if not ml_report:
+            typer.echo(f"  Skipping label={inv_label or '(none)'}: ML report {ml_run_id} not found")
+            continue
+
+        # Parse digest into lines
+        digest = inv.get("checkpoint_digest", "")
+        digest_lines = digest.splitlines() if digest else None
+
+        # Assemble report
+        report = assemble_full_report(
+            run_id=run_id,
+            ml_run_id=ml_run_id,
+            ml_report=ml_report,
+            findings=inv["findings"],
+            hypotheses=inv["hypotheses"],
+            digest_lines=digest_lines,
+        )
+
+        # Write files
+        json_path, md_path = write_investigation_report_files(
+            run_id=run_id,
+            report=report,
+            output_dir=output_dir,
+            label=inv_label,
+        )
+
+        # Persist to Postgres
+        try:
+            store_investigation_report(run_id=run_id, report=report)
+        except Exception as e:
+            typer.echo(f"  Warning: failed to persist report to Postgres: {e}")
+
+        label_display = f" [{inv_label}]" if inv_label else ""
+        typer.echo(f"  Generated{label_display}: {json_path}")
+        typer.echo(f"  Generated{label_display}: {md_path}")
+        generated += 1
+
+    typer.echo(f"\n{generated} report(s) regenerated.")
 
 
 if __name__ == "__main__":
