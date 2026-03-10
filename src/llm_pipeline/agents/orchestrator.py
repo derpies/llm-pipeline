@@ -10,11 +10,12 @@ from datetime import UTC, datetime
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import TypeAdapter
 
-from llm_pipeline.agents.models import CircuitBreakerBudget, InvestigationTopic
+from llm_pipeline.agents.models import CircuitBreakerBudget, InvestigatorRole, InvestigationTopic
 from llm_pipeline.agents.prompts import ORCHESTRATOR_SYSTEM_PROMPT
 from llm_pipeline.agents.state import InvestigationCycleState
 from llm_pipeline.config import settings
 from llm_pipeline.models.llm import get_llm
+from llm_pipeline.models.rate_limiter import get_rate_limiter
 from llm_pipeline.models.token_tracker import get_tracker
 from llm_pipeline.tools.circuit_breaker import check_budget_exceeded
 
@@ -68,10 +69,11 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
         f"{summary}\n\n"
         f"Create up to {settings.circuit_breaker_max_topics} focused investigation topics, prioritized by severity and impact. "
         f"Respond with a JSON array of objects, each with fields: "
-        f"title, dimension, dimension_value, metrics (array), question, priority, context.\n"
+        f"title, dimension, dimension_value, metrics (array), question, priority, context, role.\n"
         f"Respond with ONLY the JSON array, no other text."
     )
 
+    get_rate_limiter().acquire()
     response = llm.invoke(
         [
             SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
@@ -79,6 +81,11 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
         ]
     )
     get_tracker().record(response, model=settings.model_orchestrator)
+    usage = getattr(response, "usage_metadata", None)
+    if usage:
+        inp = (usage.get("input_tokens", 0) if isinstance(usage, dict)
+               else getattr(usage, "input_tokens", 0))
+        get_rate_limiter().record(inp)
 
     # Parse the response into InvestigationTopics
     topics = _parse_topics(response.content)
@@ -193,13 +200,14 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
         "to test untested hypotheses or resolve inconclusive findings.\n"
         "If the findings are sufficient, respond with an empty JSON array [].\n"
         f"Respond with ONLY a JSON array of up to {settings.circuit_breaker_max_topics} investigation topic objects "
-        "(fields: title, dimension, dimension_value, metrics, question, priority, context), "
+        "(fields: title, dimension, dimension_value, metrics, question, priority, context, role), "
         "or an empty array []."
     )
 
     evaluation_error = False
     try:
         llm = get_llm(role="orchestrator")
+        get_rate_limiter().acquire()
         response = llm.invoke(
             [
                 SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
@@ -207,6 +215,11 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
             ]
         )
         get_tracker().record(response, model=settings.model_orchestrator)
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            inp = (usage.get("input_tokens", 0) if isinstance(usage, dict)
+                   else getattr(usage, "input_tokens", 0))
+            get_rate_limiter().record(inp)
         follow_up_topics = _parse_topics(response.content)
     except Exception as e:
         logger.error("Orchestrator evaluation failed: %s: %s", type(e).__name__, e)
@@ -321,12 +334,18 @@ def _parse_topics(content: str) -> list[InvestigationTopic]:
         # Coerce unknown priority values to valid enum values
         _PRIORITY_MAP = {"critical": "high", "urgent": "high", "normal": "medium", "minor": "low"}
         _VALID_PRIORITIES = {"high", "medium", "low"}
+        _VALID_ROLES = {r.value for r in InvestigatorRole}
         if isinstance(data, list):
             for item in data:
-                if isinstance(item, dict) and "priority" in item:
-                    p = str(item["priority"]).lower()
-                    if p not in _VALID_PRIORITIES:
-                        item["priority"] = _PRIORITY_MAP.get(p, "high")
+                if isinstance(item, dict):
+                    if "priority" in item:
+                        p = str(item["priority"]).lower()
+                        if p not in _VALID_PRIORITIES:
+                            item["priority"] = _PRIORITY_MAP.get(p, "high")
+                    if "role" in item:
+                        r = str(item["role"]).lower()
+                        if r not in _VALID_ROLES:
+                            item["role"] = InvestigatorRole.DIAGNOSTICS.value
         adapter = TypeAdapter(list[InvestigationTopic])
         return adapter.validate_python(data)
     except (json.JSONDecodeError, Exception) as e:

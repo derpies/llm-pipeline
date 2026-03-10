@@ -11,6 +11,7 @@ from llm_pipeline.agents.models import (
     FindingStatus,
     Hypothesis,
     InvestigationTopic,
+    InvestigatorRole,
 )
 
 # ---------------------------------------------------------------------------
@@ -26,6 +27,7 @@ def _make_topic(**overrides) -> InvestigationTopic:
         "question": "Why is delivery dropping?",
         "priority": "high",
         "context": "Test context",
+        "role": "diagnostics",
     }
     defaults.update(overrides)
     return InvestigationTopic(**defaults)
@@ -70,6 +72,7 @@ class TestExtractResults:
             "hypotheses": [],
             "digest_lines": [],
             "prior_context": "",
+            "grounding_context": "",
         }
 
         result = _extract_results(state)
@@ -113,6 +116,7 @@ class TestExtractResults:
             "hypotheses": [],
             "digest_lines": [],
             "prior_context": "",
+            "grounding_context": "",
         }
 
         result = _extract_results(state)
@@ -136,6 +140,7 @@ class TestExtractResults:
             "hypotheses": [],
             "digest_lines": [],
             "prior_context": "",
+            "grounding_context": "",
         }
 
         result = _extract_results(state)
@@ -165,6 +170,7 @@ class TestExtractResults:
             "hypotheses": [],
             "digest_lines": [],
             "prior_context": "",
+            "grounding_context": "",
         }
 
         result = _extract_results(state)
@@ -190,6 +196,7 @@ class TestExtractResults:
             "hypotheses": [],
             "digest_lines": [],
             "prior_context": "",
+            "grounding_context": "",
         }
 
         result = _extract_results(state)
@@ -219,6 +226,7 @@ class TestExtractResults:
             "hypotheses": [],
             "digest_lines": [],
             "prior_context": "",
+            "grounding_context": "",
         }
 
         result = _extract_results(state)
@@ -856,6 +864,7 @@ class TestExtractResultsToolErrors:
             "hypotheses": [],
             "digest_lines": [],
             "prior_context": "",
+            "grounding_context": "",
         }
 
         result = _extract_results(state)
@@ -885,7 +894,225 @@ class TestExtractResultsToolErrors:
             "hypotheses": [],
             "digest_lines": [],
             "prior_context": "",
+            "grounding_context": "",
         }
 
         result = _extract_results(state)
         assert not any("[tool_errors]" in d for d in result["digest_lines"])
+
+
+# ---------------------------------------------------------------------------
+# InvestigatorRole tests
+# ---------------------------------------------------------------------------
+
+class TestInvestigatorRole:
+    """Tests for specialist role assignment and prompt injection."""
+
+    def test_investigation_topic_defaults_to_diagnostics(self):
+        topic = _make_topic()
+        assert topic.role == InvestigatorRole.DIAGNOSTICS
+
+    def test_investigation_topic_accepts_valid_role(self):
+        topic = _make_topic(role="reputation")
+        assert topic.role == InvestigatorRole.REPUTATION
+
+    def test_role_prompt_supplement_injected_in_call_investigator(self):
+        """_call_investigator should include the role's prompt supplement in the system message."""
+        from llm_pipeline.agents.investigator import _call_investigator
+        from llm_pipeline.agents.roles import ROLE_PROMPT_SUPPLEMENTS
+
+        mock_response = AIMessage(content="I will investigate.")
+        mock_response.usage_metadata = {"input_tokens": 100, "output_tokens": 50}
+
+        with patch("llm_pipeline.agents.investigator.get_llm") as mock_get_llm:
+            mock_llm = MagicMock()
+            mock_llm.bind_tools.return_value = mock_llm
+            mock_llm.invoke.return_value = mock_response
+            mock_get_llm.return_value = mock_llm
+
+            state = {
+                "topic": _make_topic(role="reputation"),
+                "run_id": "run-001",
+                "ml_run_id": "ml-001",
+                "messages": [],
+                "findings": [],
+                "hypotheses": [],
+                "digest_lines": [],
+                "prior_context": "",
+                "grounding_context": "",
+            }
+
+            _call_investigator(state)
+
+            # Check that the system message contains the reputation supplement
+            call_args = mock_llm.invoke.call_args[0][0]
+            system_msg = call_args[0]
+            assert "reputation specialist" in system_msg.content.lower()
+            assert ROLE_PROMPT_SUPPLEMENTS[InvestigatorRole.REPUTATION] in system_msg.content
+
+    def test_grounding_context_injected_in_brief(self):
+        """_call_investigator should include grounding_context in the brief."""
+        from llm_pipeline.agents.investigator import _call_investigator
+
+        mock_response = AIMessage(content="I will investigate.")
+        mock_response.usage_metadata = {"input_tokens": 100, "output_tokens": 50}
+
+        with patch("llm_pipeline.agents.investigator.get_llm") as mock_get_llm:
+            mock_llm = MagicMock()
+            mock_llm.bind_tools.return_value = mock_llm
+            mock_llm.invoke.return_value = mock_response
+            mock_get_llm.return_value = mock_llm
+
+            grounding = "- [Reputation] IP warming is critical for new senders"
+            state = {
+                "topic": _make_topic(role="reputation"),
+                "run_id": "run-001",
+                "ml_run_id": "ml-001",
+                "messages": [],
+                "findings": [],
+                "hypotheses": [],
+                "digest_lines": [],
+                "prior_context": "",
+                "grounding_context": grounding,
+            }
+
+            _call_investigator(state)
+
+            call_args = mock_llm.invoke.call_args[0][0]
+            brief_msg = call_args[1]  # HumanMessage (the brief)
+            assert "--- Domain Knowledge ---" in brief_msg.content
+            assert "IP warming is critical" in brief_msg.content
+
+    def test_orchestrator_parse_topics_with_valid_role(self):
+        from llm_pipeline.agents.orchestrator import _parse_topics
+
+        content = '[{"title": "T1", "dimension": "listid", "dimension_value": "VH", ' \
+                  '"metrics": ["delivery_rate"], "question": "Why?", ' \
+                  '"priority": "high", "context": "ctx", "role": "compliance"}]'
+        topics = _parse_topics(content)
+        assert len(topics) == 1
+        assert topics[0].role == InvestigatorRole.COMPLIANCE
+
+    def test_orchestrator_parse_topics_invalid_role_defaults_to_diagnostics(self):
+        from llm_pipeline.agents.orchestrator import _parse_topics
+
+        content = '[{"title": "T1", "dimension": "listid", "dimension_value": "VH", ' \
+                  '"metrics": ["delivery_rate"], "question": "Why?", ' \
+                  '"priority": "high", "context": "ctx", "role": "invalid_role"}]'
+        topics = _parse_topics(content)
+        assert len(topics) == 1
+        assert topics[0].role == InvestigatorRole.DIAGNOSTICS
+
+    def test_orchestrator_parse_topics_missing_role_defaults_to_diagnostics(self):
+        from llm_pipeline.agents.orchestrator import _parse_topics
+
+        content = '[{"title": "T1", "dimension": "listid", "dimension_value": "VH", ' \
+                  '"metrics": ["delivery_rate"], "question": "Why?", ' \
+                  '"priority": "high", "context": "ctx"}]'
+        topics = _parse_topics(content)
+        assert len(topics) == 1
+        assert topics[0].role == InvestigatorRole.DIAGNOSTICS
+
+    def test_route_investigations_includes_grounding_context(self):
+        """_route_investigations should pass grounding_context in Send payloads."""
+        from llm_pipeline.agents.graph import _route_investigations
+
+        topic = _make_topic(role="compliance")
+        state = {
+            "investigation_plan": [topic],
+            "run_id": "run-001",
+            "ml_run_id": "ml-001",
+        }
+
+        with patch("llm_pipeline.agents.roles.get_role_grounding", return_value="grounding text"):
+            result = _route_investigations(state)
+
+        assert len(result) == 1
+        assert result[0].arg["grounding_context"] == "grounding text"
+
+    def test_route_after_evaluate_includes_grounding_context(self):
+        """_route_after_evaluate should pass grounding_context in Send payloads."""
+        from llm_pipeline.agents.graph import _route_after_evaluate
+
+        topic = _make_topic(role="isp")
+        state = {
+            "investigation_plan": [topic],
+            "run_id": "run-001",
+            "ml_run_id": "ml-001",
+            "prior_findings": [],
+            "prior_hypotheses": [],
+        }
+
+        with patch("llm_pipeline.agents.roles.get_role_grounding", return_value="isp grounding"):
+            result = _route_after_evaluate(state)
+
+        assert isinstance(result, list)
+        assert result[0].arg["grounding_context"] == "isp grounding"
+
+
+class TestGetRoleGrounding:
+    """Tests for roles.get_role_grounding."""
+
+    def test_returns_formatted_results(self):
+        from llm_pipeline.agents.roles import get_role_grounding
+
+        from llm_pipeline.knowledge.retrieval import KnowledgeResult
+        from llm_pipeline.knowledge.models import KnowledgeTier
+
+        mock_results = [
+            KnowledgeResult(
+                entry_id="1",
+                tier=KnowledgeTier.GROUNDED,
+                statement="SPF validates sender IP",
+                topic="Authentication",
+                similarity=0.9,
+                weighted_score=0.9,
+            ),
+        ]
+
+        with patch("llm_pipeline.knowledge.retrieval.retrieve_knowledge", return_value=mock_results):
+            result = get_role_grounding(InvestigatorRole.COMPLIANCE, top_k=3)
+
+        assert "Authentication" in result
+        assert "SPF validates sender IP" in result
+
+    def test_returns_empty_on_failure(self):
+        from llm_pipeline.agents.roles import get_role_grounding
+
+        with patch("llm_pipeline.knowledge.retrieval.retrieve_knowledge", side_effect=Exception("conn err")):
+            result = get_role_grounding(InvestigatorRole.REPUTATION)
+
+        assert result == ""
+
+    def test_returns_empty_when_no_results(self):
+        from llm_pipeline.agents.roles import get_role_grounding
+
+        with patch("llm_pipeline.knowledge.retrieval.retrieve_knowledge", return_value=[]):
+            result = get_role_grounding(InvestigatorRole.ISP)
+
+        assert result == ""
+
+    def test_truncates_long_statements(self):
+        from llm_pipeline.agents.roles import get_role_grounding
+
+        from llm_pipeline.knowledge.retrieval import KnowledgeResult
+        from llm_pipeline.knowledge.models import KnowledgeTier
+
+        long_statement = "x" * 500
+        mock_results = [
+            KnowledgeResult(
+                entry_id="1",
+                tier=KnowledgeTier.GROUNDED,
+                statement=long_statement,
+                topic="Test",
+                similarity=0.9,
+                weighted_score=0.9,
+            ),
+        ]
+
+        with patch("llm_pipeline.knowledge.retrieval.retrieve_knowledge", return_value=mock_results):
+            result = get_role_grounding(InvestigatorRole.DIAGNOSTICS)
+
+        # Should be truncated to 300 chars (297 + "...")
+        assert "..." in result
+        assert len(result.split("] ")[1]) == 300

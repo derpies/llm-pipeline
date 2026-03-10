@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     summarization_top_dimensions: int = 10
     summarization_max_narratives: int = 20
 
+    # Rate limiting
+    rate_limit_tokens_per_minute: int = 25_000  # input tokens/min (Anthropic limit: 30K)
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "dev"  # "dev" for pretty-print, "json" for structured

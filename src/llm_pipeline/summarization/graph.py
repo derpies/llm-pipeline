@@ -47,10 +47,17 @@ def _get_llm() -> BaseChatModel:
 
 def _invoke_llm(llm: BaseChatModel, prompt: str) -> str:
     """Invoke the LLM and return the response content as a string."""
+    from llm_pipeline.models.rate_limiter import get_rate_limiter
     from llm_pipeline.models.token_tracker import get_tracker
 
+    get_rate_limiter().acquire()
     response = llm.invoke(prompt)
     get_tracker().record(response)
+    usage = getattr(response, "usage_metadata", None)
+    if usage:
+        inp = (usage.get("input_tokens", 0) if isinstance(usage, dict)
+               else getattr(usage, "input_tokens", 0))
+        get_rate_limiter().record(inp)
     return str(response.content)
 
 

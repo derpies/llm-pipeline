@@ -24,7 +24,8 @@ class InvestigationCycleState(TypedDict, total=False):
 
     # Input
     ml_report: Any  # AnalysisReport from email_analytics
-    run_id: str
+    run_id: str  # execution UUID
+    ml_run_id: str  # ML analysis run_id (for tool queries)
 
     # Planning
     investigation_plan: list[InvestigationTopic]
@@ -66,8 +67,10 @@ class InvestigatorState(MessagesState):
 
     # Input from orchestrator
     topic: InvestigationTopic
-    run_id: str
+    run_id: str  # execution UUID
+    ml_run_id: str  # ML analysis run_id (for tool queries)
     prior_context: str  # Summary of prior findings for follow-up rounds
+    grounding_context: str  # Pre-fetched domain knowledge for the investigator's role
 
     # Output (flows back to parent via fan-in)
     hypotheses: Annotated[list[Hypothesis], operator.add]

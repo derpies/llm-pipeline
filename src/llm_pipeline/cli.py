@@ -7,6 +7,7 @@ from typing import Annotated
 import typer
 from langchain_core.messages import HumanMessage
 
+from llm_pipeline.models.rate_limiter import reset_rate_limiter
 from llm_pipeline.models.token_tracker import get_tracker, reset_tracker
 from llm_pipeline.utils.logging import setup_logging
 
@@ -122,6 +123,7 @@ def analyze_email(
     run_id = str(uuid.uuid4())
     setup_logging(command="analyze_email", run_id=run_id)
     reset_tracker()
+    reset_rate_limiter()
 
     from llm_pipeline.email_analytics.graph import build_email_analytics_graph
 
@@ -207,6 +209,7 @@ def investigate(
     run_id = str(uuid.uuid4())
     setup_logging(command="investigate", run_id=run_id)
     reset_tracker()
+    reset_rate_limiter()
 
     if dry_run:
         from llm_pipeline.config import settings as _settings
@@ -259,6 +262,7 @@ def investigate(
     result = graph.invoke({
         "ml_report": report,
         "run_id": run_id,
+        "ml_run_id": ml_run_id,
     })
 
     # Print checkpoint digest
@@ -379,6 +383,7 @@ def summarize(
     summarize_run_id = str(uuid.uuid4())
     setup_logging(command="summarize", run_id=summarize_run_id)
     reset_tracker()
+    reset_rate_limiter()
 
     from llm_pipeline.email_analytics.storage import init_db, load_report
 

@@ -7,6 +7,7 @@ from langgraph.prebuilt import ToolNode
 
 from llm_pipeline.agents.prompts import CHAT_SYSTEM_PROMPT
 from llm_pipeline.models.llm import get_llm
+from llm_pipeline.models.rate_limiter import get_rate_limiter
 from llm_pipeline.models.token_tracker import get_tracker
 from llm_pipeline.tools.common import CHAT_TOOLS
 
@@ -23,8 +24,14 @@ def _call_model(state: MessagesState) -> dict:
     """Invoke the LLM with the current message history."""
     llm = get_llm().bind_tools(CHAT_TOOLS)
     messages = [SystemMessage(content=CHAT_SYSTEM_PROMPT)] + state["messages"]
+    get_rate_limiter().acquire()
     response = llm.invoke(messages)
     get_tracker().record(response)
+    usage = getattr(response, "usage_metadata", None)
+    if usage:
+        inp = (usage.get("input_tokens", 0) if isinstance(usage, dict)
+               else getattr(usage, "input_tokens", 0))
+        get_rate_limiter().record(inp)
     return {"messages": [response]}
 
 

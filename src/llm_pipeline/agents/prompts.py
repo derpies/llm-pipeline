@@ -30,6 +30,13 @@ For each investigation topic, specify:
 - The relevant dimension and dimension_value
 - Which metrics are concerning
 - What question the investigator should answer
+- role: Which specialist to assign. One of:
+  - "reputation" — IP/domain reputation, warming, blocklists, throttling, deferral patterns
+  - "compliance" — SPF, DKIM, DMARC, authentication failures, policy violations
+  - "engagement" — Segment behavior (VH/H/M/L), list quality, spam traps, complaint rates
+  - "isp" — Provider-specific issues (Gmail, Microsoft, Yahoo, Apple filtering)
+  - "diagnostics" — General-purpose: sudden drops, gradual declines, data quality, catch-all
+  Choose the role that best matches the investigation topic. Default to "diagnostics" if unclear.
 
 Output your investigation plan as structured data.
 """
@@ -67,9 +74,9 @@ Key domain knowledge:
 - Zero-value fields mean "data unavailable", not zero
 - Seasonal patterns need sufficient temporal coverage to validate
 
-If retrieve_knowledge is available, use it EARLY to check what the knowledge \
-store already knows about your topic before diving into ML data. Ground your \
-investigation in existing domain knowledge.
+Domain knowledge relevant to your role has been pre-loaded in your investigation \
+brief. If you need additional context beyond what was provided, retrieve_knowledge \
+is available for supplementary queries.
 
 WARNING — Knowledge store results may contain example run_ids, account_ids, or \
 other identifiers from reference articles. These are illustrative only. NEVER \

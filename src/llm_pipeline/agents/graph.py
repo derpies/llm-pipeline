@@ -74,19 +74,46 @@ def _investigate_topic(state: InvestigatorState) -> dict:
         logger.error(
             "Investigator failed for topic '%s': %s elapsed_s=%.2f", topic.title, e, elapsed
         )
-        fallback = Finding(
-            topic_title=topic.title,
-            statement=f"Investigation failed: {type(e).__name__}: {e}",
-            status=FindingStatus.INCONCLUSIVE,
-            evidence=[],
-            created_at=datetime.now(UTC),
-            run_id=state.get("run_id", ""),
-            tool_use_failed=True,
-        )
+
+        # Salvage any findings/hypotheses reported before the crash
+        from llm_pipeline.agents.investigator import _extract_results
+
+        salvaged_findings: list[Finding] = []
+        salvaged_hypotheses = []
+        digest_lines: list[str] = [f"[error] Investigator crashed: {error_msg}"]
+        try:
+            salvaged = _extract_results(state)
+            salvaged_findings = salvaged.get("findings", [])
+            salvaged_hypotheses = salvaged.get("hypotheses", [])
+            digest_lines.extend(salvaged.get("digest_lines", []))
+            if salvaged_findings:
+                logger.info(
+                    "Salvaged %d findings, %d hypotheses from crashed investigator '%s'",
+                    len(salvaged_findings),
+                    len(salvaged_hypotheses),
+                    topic.title,
+                )
+        except Exception:
+            logger.debug("Could not salvage findings from crashed investigator '%s'", topic.title)
+
+        # If nothing was salvaged, create a fallback finding
+        if not salvaged_findings:
+            salvaged_findings = [
+                Finding(
+                    topic_title=topic.title,
+                    statement=f"Investigation failed: {type(e).__name__}: {e}",
+                    status=FindingStatus.INCONCLUSIVE,
+                    evidence=[],
+                    created_at=datetime.now(UTC),
+                    run_id=state.get("run_id", ""),
+                    tool_use_failed=True,
+                )
+            ]
+
         return {
-            "findings": [fallback],
-            "hypotheses": [],
-            "digest_lines": [f"[error] Investigator crashed: {error_msg}"],
+            "findings": salvaged_findings,
+            "hypotheses": salvaged_hypotheses,
+            "digest_lines": digest_lines,
             "completed_topics": [topic.title],
             "topic_errors": [error_msg],
         }
@@ -94,23 +121,29 @@ def _investigate_topic(state: InvestigatorState) -> dict:
 
 def _route_investigations(state: InvestigationCycleState) -> list[Send]:
     """Fan out: dispatch one investigator per topic."""
+    from llm_pipeline.agents.roles import get_role_grounding
+
     topics = state.get("investigation_plan", [])
     run_id = state.get("run_id", "")
+    ml_run_id = state.get("ml_run_id", "") or run_id
     logger.info("fan_out dispatching run_id=%s topic_count=%d", run_id, len(topics))
 
     sends = []
     for topic in topics:
+        grounding_context = get_role_grounding(topic.role)
         sends.append(
             Send(
                 "investigate_topic",
                 {
                     "topic": topic,
                     "run_id": run_id,
+                    "ml_run_id": ml_run_id,
                     "messages": [],
                     "findings": [],
                     "hypotheses": [],
                     "digest_lines": [],
                     "prior_context": "",
+                    "grounding_context": grounding_context,
                 },
             )
         )
@@ -148,10 +181,13 @@ def _route_after_evaluate(
     """Route after evaluation: synthesize if done, or fan-out for more investigation."""
     topics = state.get("investigation_plan", [])
     run_id = state.get("run_id", "")
+    ml_run_id = state.get("ml_run_id", "") or run_id
 
     if not topics:
         logger.debug("routing to synthesize run_id=%s", run_id)
         return "synthesize"
+
+    from llm_pipeline.agents.roles import get_role_grounding
 
     logger.info("follow_up dispatching run_id=%s topic_count=%d", run_id, len(topics))
 
@@ -160,17 +196,20 @@ def _route_after_evaluate(
 
     sends = []
     for topic in topics:
+        grounding_context = get_role_grounding(topic.role)
         sends.append(
             Send(
                 "investigate_topic",
                 {
                     "topic": topic,
                     "run_id": run_id,
+                    "ml_run_id": ml_run_id,
                     "messages": [],
                     "findings": [],
                     "hypotheses": [],
                     "digest_lines": [],
                     "prior_context": prior_context,
+                    "grounding_context": grounding_context,
                 },
             )
         )

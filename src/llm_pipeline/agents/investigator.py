@@ -11,9 +11,11 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
 from llm_pipeline.agents.prompts import INVESTIGATOR_SYSTEM_PROMPT
+from llm_pipeline.agents.roles import ROLE_PROMPT_SUPPLEMENTS
 from llm_pipeline.agents.state import InvestigatorState
 from llm_pipeline.config import settings
 from llm_pipeline.models.llm import get_llm
+from llm_pipeline.models.rate_limiter import get_rate_limiter
 from llm_pipeline.models.token_tracker import get_tracker
 from llm_pipeline.tools.common import get_current_datetime
 from llm_pipeline.tools.ml import INVESTIGATOR_ML_TOOLS
@@ -122,6 +124,7 @@ def _call_investigator(state: InvestigatorState) -> dict:
 
     topic = state["topic"]
     run_id = state.get("run_id", "")
+    ml_run_id = state.get("ml_run_id", "") or run_id
 
     # On first call, inject the investigation brief
     if len(state["messages"]) == 0 or (
@@ -133,8 +136,8 @@ def _call_investigator(state: InvestigatorState) -> dict:
             f"Metrics of interest: {', '.join(topic.metrics)}",
             f"Question: {topic.question}",
             f"Context: {topic.context}",
-            f"\nRun ID for all ML tool calls: {run_id}",
-            f'(Pass run_id="{run_id}" to every ML tool: get_aggregations, '
+            f"\nRun ID for all ML tool calls: {ml_run_id}",
+            f'(Pass run_id="{ml_run_id}" to every ML tool: get_aggregations, '
             f"get_anomalies, get_trends, get_ml_report_summary, "
             f"get_data_completeness, compare_dimensions)",
         ]
@@ -144,6 +147,11 @@ def _call_investigator(state: InvestigatorState) -> dict:
         if prior_context:
             brief_parts.append(f"\n--- Prior findings from earlier rounds ---\n{prior_context}")
 
+        # Inject pre-fetched grounding context for this role
+        grounding_context = state.get("grounding_context", "")
+        if grounding_context:
+            brief_parts.append(f"\n--- Domain Knowledge ---\n{grounding_context}")
+
         brief_parts.append(
             "\nUse the ML tools to examine the data. Form a hypothesis, test it, "
             "and report your findings using report_finding and report_hypothesis tools. "
@@ -151,25 +159,48 @@ def _call_investigator(state: InvestigatorState) -> dict:
         )
         brief = "\n".join(brief_parts)
         logger.info(
-            "investigator brief sent run_id=%s topic=%s dimension=%s=%s has_prior_context=%s",
+            "investigator brief sent run_id=%s topic=%s dimension=%s=%s "
+            "role=%s has_prior_context=%s has_grounding=%s",
             run_id,
             topic.title,
             topic.dimension,
             topic.dimension_value,
+            topic.role,
             bool(prior_context),
+            bool(grounding_context),
         )
 
+        # Build system prompt with role-specific supplement
+        role = topic.role
+        role_supplement = ROLE_PROMPT_SUPPLEMENTS.get(role, "")
+        system_prompt = INVESTIGATOR_SYSTEM_PROMPT
+        if role_supplement:
+            system_prompt = f"{system_prompt}\n\n{role_supplement}"
+
         messages = [
-            SystemMessage(content=INVESTIGATOR_SYSTEM_PROMPT),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=brief),
         ]
     else:
-        messages = [SystemMessage(content=INVESTIGATOR_SYSTEM_PROMPT)] + state["messages"]
+        # Build system prompt with role-specific supplement for subsequent calls
+        role = topic.role
+        role_supplement = ROLE_PROMPT_SUPPLEMENTS.get(role, "")
+        system_prompt = INVESTIGATOR_SYSTEM_PROMPT
+        if role_supplement:
+            system_prompt = f"{system_prompt}\n\n{role_supplement}"
 
+        messages = [SystemMessage(content=system_prompt)] + state["messages"]
+
+    get_rate_limiter().acquire()
     t0 = time.monotonic()
     response = llm.invoke(messages)
     elapsed = time.monotonic() - t0
     get_tracker().record(response, model=settings.model_investigator)
+    usage = getattr(response, "usage_metadata", None)
+    if usage:
+        inp = (usage.get("input_tokens", 0) if isinstance(usage, dict)
+               else getattr(usage, "input_tokens", 0))
+        get_rate_limiter().record(inp)
     logger.debug(
         "investigator llm_call run_id=%s topic=%s messages=%d elapsed_s=%.2f",
         run_id,
@@ -352,12 +383,53 @@ def _extract_results(state: InvestigatorState) -> dict:
     }
 
 
+# Names of ML tools whose run_id must match the ML analysis run
+_ML_TOOL_NAMES = {
+    "get_aggregations",
+    "get_anomalies",
+    "get_trends",
+    "get_ml_report_summary",
+    "get_data_completeness",
+    "compare_dimensions",
+}
+
+
+def _patch_ml_run_id(state: InvestigatorState) -> dict:
+    """Override run_id in ML tool calls with the correct ml_run_id from state.
+
+    LLMs sometimes hallucinate run_ids. This node mutates tool_call args
+    in-place on the AIMessage already in state, so the downstream ToolNode
+    executes with the correct value. Returns no state updates.
+    """
+    ml_run_id = state.get("ml_run_id", "")
+    if not ml_run_id:
+        return {}
+
+    last_msg = state["messages"][-1]
+    if not hasattr(last_msg, "tool_calls") or not last_msg.tool_calls:
+        return {}
+
+    for tc in last_msg.tool_calls:
+        if tc.get("name") in _ML_TOOL_NAMES and "run_id" in tc.get("args", {}):
+            if tc["args"]["run_id"] != ml_run_id:
+                logger.warning(
+                    "Patched hallucinated run_id in %s: %r → %s",
+                    tc["name"],
+                    tc["args"]["run_id"],
+                    ml_run_id,
+                )
+                tc["args"]["run_id"] = ml_run_id
+
+    return {}
+
+
 def build_investigator_graph():
     """Build the investigator subgraph with its own tool loop."""
     tools = _get_investigator_tools()
     graph = StateGraph(InvestigatorState)
 
     graph.add_node("investigator", _call_investigator)
+    graph.add_node("patch_ml_run_id", _patch_ml_run_id)
     graph.add_node("tools", ToolNode(tools))
     graph.add_node("extract_results", _extract_results)
 
@@ -365,8 +437,9 @@ def build_investigator_graph():
     graph.add_conditional_edges(
         "investigator",
         _should_continue,
-        {"tools": "tools", END: "extract_results"},
+        {"tools": "patch_ml_run_id", END: "extract_results"},
     )
+    graph.add_edge("patch_ml_run_id", "tools")
     graph.add_edge("tools", "investigator")
     graph.add_edge("extract_results", END)
 
