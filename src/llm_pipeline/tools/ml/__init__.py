@@ -9,12 +9,12 @@ from llm_pipeline.tools.ml.get_trends import get_trends
 
 # --- Tool role declarations for auto-discovery ---
 TOOL_ROLES = [
-    (get_aggregations, ["investigator"]),
-    (get_anomalies, ["investigator", "orchestrator"]),
-    (get_trends, ["investigator", "orchestrator"]),
-    (get_ml_report_summary, ["investigator", "orchestrator"]),
-    (get_data_completeness, ["investigator"]),
-    (compare_dimensions, ["investigator"]),
+    (get_aggregations, ["investigator", "reviewer"]),
+    (get_anomalies, ["investigator", "reviewer", "orchestrator"]),
+    (get_trends, ["investigator", "reviewer", "orchestrator"]),
+    (get_ml_report_summary, ["investigator", "reviewer", "orchestrator"]),
+    (get_data_completeness, ["investigator", "reviewer"]),
+    (compare_dimensions, ["investigator", "reviewer"]),
 ]
 
 __all__ = [

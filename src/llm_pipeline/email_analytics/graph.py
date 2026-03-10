@@ -124,12 +124,14 @@ def _detect_trends(state: EmailAnalyticsState) -> dict:
 
 def _store_results(state: EmailAnalyticsState) -> dict:
     """Build the final report and persist to Postgres."""
+    file_paths = state.get("file_paths", [])
     report = AnalysisReport(
         run_id=state.get("run_id", "unknown"),
         started_at=datetime.now(UTC),
         completed_at=datetime.now(UTC),
-        files_processed=len(state.get("file_paths", [])),
+        files_processed=len(file_paths),
         events_parsed=state.get("event_count", 0),
+        source_files=file_paths,
         aggregations=state.get("merged_aggregations", []),
         completeness=state.get("merged_completeness", []),
         anomalies=state.get("anomalies", []),

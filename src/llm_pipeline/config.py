@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     model_investigator: str = "claude-sonnet-4-20250514"
     model_investigator_deep: str = "claude-opus-4-20250514"
     model_synthesizer: str = "claude-sonnet-4-20250514"
+    model_reviewer: str = "claude-sonnet-4-20250514"
     model_curator: str = "claude-haiku-4-5-20251001"
 
     # Circuit breaker thresholds
@@ -59,6 +60,7 @@ class Settings(BaseSettings):
     investigator_use_knowledge_store: bool = True
     investigator_max_llm_calls: int = 15
     investigator_max_consecutive_errors: int = 3
+    reviewer_max_llm_calls: int = 3
 
     # Summarization
     summarization_top_dimensions: int = 10

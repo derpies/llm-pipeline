@@ -244,13 +244,13 @@ class TestRouteAfterEvaluate:
         from llm_pipeline.agents.graph import _route_after_evaluate
 
         state = {"investigation_plan": []}
-        assert _route_after_evaluate(state) == "synthesize"
+        assert _route_after_evaluate(state) == "assemble_report"
 
     def test_returns_synthesize_when_plan_missing(self):
         from llm_pipeline.agents.graph import _route_after_evaluate
 
         state = {}
-        assert _route_after_evaluate(state) == "synthesize"
+        assert _route_after_evaluate(state) == "assemble_report"
 
     def test_returns_send_list_when_topics_exist(self):
         from langgraph.types import Send
@@ -471,7 +471,9 @@ class TestInvestigationLoopIntegration:
         )
 
     def test_full_loop_single_iteration(self):
-        """Full graph: plan → investigate → evaluate → synthesize → checkpoint."""
+        """Full graph: plan → investigate → review → evaluate → assemble → synthesize → checkpoint."""
+        import json
+
         from llm_pipeline.agents.graph import build_investigation_graph
 
         # Mock the orchestrator plan LLM to return one topic
@@ -497,6 +499,23 @@ class TestInvestigationLoopIntegration:
         # Mock the orchestrator evaluate LLM to return no follow-ups
         eval_response = AIMessage(content="[]")
 
+        # Mock the reviewer LLM
+        reviewer_response = AIMessage(content=json.dumps([{
+            "finding_index": 0,
+            "finding_statement": "VH delivery rate dropped due to bounce spike",
+            "assessment": "supported",
+            "reasoning": "Evidence is consistent",
+            "suggested_action": "accept",
+        }]))
+
+        # Mock the synthesizer LLM
+        synthesizer_response = AIMessage(content=json.dumps({
+            "executive_summary": "VH segment experienced a delivery drop.",
+            "observations": [
+                {"section": "next_cycle_focus", "note": "Monitor bounce rates."},
+            ],
+        }))
+
         call_counter = {"plan": 0, "investigator": 0, "eval": 0}
 
         def mock_llm_factory(role=None, **kwargs):
@@ -504,7 +523,6 @@ class TestInvestigationLoopIntegration:
 
             if role == "orchestrator":
                 def invoke_side_effect(messages, **kw):
-                    # Distinguish plan vs evaluate by looking at message content
                     content = messages[-1].content if messages else ""
                     if "create investigation topics" in content.lower():
                         call_counter["plan"] += 1
@@ -513,6 +531,11 @@ class TestInvestigationLoopIntegration:
                         call_counter["eval"] += 1
                         return eval_response
                 mock.invoke.side_effect = invoke_side_effect
+            elif role == "reviewer":
+                mock.bind_tools.return_value = mock
+                mock.invoke.return_value = reviewer_response
+            elif role == "synthesizer":
+                mock.invoke.return_value = synthesizer_response
             else:
                 # Investigator mock
                 def inv_invoke(messages, **kw):
@@ -526,23 +549,31 @@ class TestInvestigationLoopIntegration:
             return mock
 
         inv_patch = "llm_pipeline.agents.plugins.investigator.agent.get_llm"
+        rev_patch = "llm_pipeline.agents.reviewer.get_llm"
+        syn_patch = "llm_pipeline.agents.synthesizer.get_llm"
         with patch("llm_pipeline.agents.orchestrator.get_llm", side_effect=mock_llm_factory):
             with patch(inv_patch, side_effect=mock_llm_factory):
-                graph = build_investigation_graph()
-                result = graph.invoke({
-                    "ml_report": self._make_mock_report(),
-                    "run_id": "test-run",
-                })
+                with patch(rev_patch, side_effect=mock_llm_factory):
+                    with patch(syn_patch, side_effect=mock_llm_factory):
+                        graph = build_investigation_graph()
+                        result = graph.invoke({
+                            "ml_report": self._make_mock_report(),
+                            "run_id": "test-run",
+                        })
 
         assert result["iteration_count"] >= 1
         assert len(result["findings"]) >= 1
         assert result["findings"][0].status == FindingStatus.CONFIRMED
         assert "checkpoint_digest" in result
         assert "CONFIRMED" in result["checkpoint_digest"]
+        # Verify reviewer annotations present
+        assert len(result.get("review_annotations", [])) >= 1
+        # Verify synthesis narrative present
+        assert result.get("synthesis_narrative", "")
 
-    def test_synthesize_produces_report(self):
-        """Synthesize node produces a report key in state with segment health."""
-        from llm_pipeline.agents.graph import _synthesize
+    def test_assemble_report_produces_report(self):
+        """Assemble_report node produces a report key in state with segment health."""
+        from llm_pipeline.agents.graph import _assemble_report
         from llm_pipeline.email_analytics.models import AggregationBucket
 
         now = datetime.now(UTC)
@@ -579,7 +610,7 @@ class TestInvestigationLoopIntegration:
             "digest_lines": ["[plan] Created 1 topic"],
         }
 
-        result = _synthesize(state)
+        result = _assemble_report(state)
         assert "report" in result
         inv_report = result["report"]
         assert len(inv_report.structured.segment_health) == 1
@@ -589,6 +620,8 @@ class TestInvestigationLoopIntegration:
 
     def test_circuit_breaker_stops_iteration(self):
         """Circuit breaker stops the loop even when LLM wants more investigation."""
+        import json
+
         from llm_pipeline.agents.graph import build_investigation_graph
 
         plan_response = AIMessage(content='[{"title": "Test topic", '
@@ -612,6 +645,20 @@ class TestInvestigationLoopIntegration:
             '"metrics": ["delivery_rate"], "question": "Dig deeper", '
             '"priority": "high", "context": "follow up"}]')
 
+        reviewer_response = AIMessage(content=json.dumps([{
+            "finding_index": 0,
+            "finding_statement": "Inconclusive result",
+            "assessment": "weak_evidence",
+            "reasoning": "Needs more data",
+            "suggested_action": "investigate_further",
+            "follow_up_question": "Check more dimensions",
+        }]))
+
+        synthesizer_response = AIMessage(content=json.dumps({
+            "executive_summary": "Investigation was halted by circuit breaker.",
+            "observations": [],
+        }))
+
         inv_call_count = {"count": 0}
 
         def mock_llm_factory(role=None, **kwargs):
@@ -625,6 +672,11 @@ class TestInvestigationLoopIntegration:
                     else:
                         return follow_up_response
                 mock.invoke.side_effect = invoke_side_effect
+            elif role == "reviewer":
+                mock.bind_tools.return_value = mock
+                mock.invoke.return_value = reviewer_response
+            elif role == "synthesizer":
+                mock.invoke.return_value = synthesizer_response
             else:
                 def inv_invoke(messages, **kw):
                     inv_call_count["count"] += 1
@@ -638,17 +690,21 @@ class TestInvestigationLoopIntegration:
             return mock
 
         inv_patch = "llm_pipeline.agents.plugins.investigator.agent.get_llm"
+        rev_patch = "llm_pipeline.agents.reviewer.get_llm"
+        syn_patch = "llm_pipeline.agents.synthesizer.get_llm"
         with patch("llm_pipeline.agents.orchestrator.get_llm", side_effect=mock_llm_factory):
             with patch(inv_patch, side_effect=mock_llm_factory):
-                with patch("llm_pipeline.agents.orchestrator.settings") as mock_settings:
-                    mock_settings.circuit_breaker_max_iterations = 2
-                    mock_settings.circuit_breaker_max_seconds = 600
+                with patch(rev_patch, side_effect=mock_llm_factory):
+                    with patch(syn_patch, side_effect=mock_llm_factory):
+                        with patch("llm_pipeline.agents.orchestrator.settings") as mock_settings:
+                            mock_settings.circuit_breaker_max_iterations = 2
+                            mock_settings.circuit_breaker_max_seconds = 600
 
-                    graph = build_investigation_graph()
-                    result = graph.invoke({
-                        "ml_report": self._make_mock_report(),
-                        "run_id": "test-run",
-                    })
+                            graph = build_investigation_graph()
+                            result = graph.invoke({
+                                "ml_report": self._make_mock_report(),
+                                "run_id": "test-run",
+                            })
 
         # Should have stopped at 2 iterations
         assert result["iteration_count"] <= 2

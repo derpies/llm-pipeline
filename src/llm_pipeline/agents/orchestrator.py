@@ -206,12 +206,32 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
 
     findings_block = "\n".join(findings_summary)
     hypotheses_block = "\n".join(hypotheses_summary) or "(none)"
+
+    # Include reviewer annotations if available
+    review_annotations = state.get("review_annotations", [])
+    annotations_block = ""
+    if review_annotations:
+        ann_lines = ["Reviewer assessments:"]
+        for ann in review_annotations:
+            ann_lines.append(
+                f"  [{ann.assessment.value}] \"{ann.finding_statement[:80]}\" "
+                f"— \"{ann.reasoning}\""
+            )
+            if ann.suggested_action.value == "investigate_further" and ann.follow_up_question:
+                ann_lines.append(f"    → investigate_further: \"{ann.follow_up_question}\"")
+            else:
+                ann_lines.append(f"    → {ann.suggested_action.value}")
+        annotations_block = "\n" + "\n".join(ann_lines) + "\n"
+
     eval_prompt = (
         f"You are evaluating investigation results after iteration {iteration_count}.\n\n"
         f"Findings so far:\n{findings_block}\n\n"
-        f"Untested hypotheses:\n{hypotheses_block}\n\n"
+        f"Untested hypotheses:\n{hypotheses_block}\n"
+        f"{annotations_block}\n"
         "Should we investigate further? If yes, create 1-2 focused follow-up topics "
-        "to test untested hypotheses or resolve inconclusive findings.\n"
+        "to test untested hypotheses or resolve inconclusive findings. "
+        "Pay attention to reviewer assessments — findings marked 'investigate_further' "
+        "with follow-up questions are strong candidates for follow-up topics.\n"
         "If the findings are sufficient, respond with an empty JSON array [].\n"
         f"Respond with ONLY a JSON array of up to {settings.circuit_breaker_max_topics} investigation topic objects "
         "(fields: title, dimension, dimension_value, metrics, question, priority, context, role), "
@@ -308,6 +328,28 @@ def orchestrator_checkpoint(state: InvestigationCycleState) -> dict:
             sections.append(f"- {h.statement}")
             if h.reasoning:
                 sections.append(f"  reasoning: {h.reasoning}")
+        sections.append("")
+
+    # Reviewer annotations
+    review_annotations = state.get("review_annotations", [])
+    if review_annotations:
+        sections.append("## Reviewer Annotations")
+        for ann in review_annotations:
+            sections.append(
+                f"- [{ann.assessment.value}] {ann.finding_statement[:80]} "
+                f"→ {ann.suggested_action.value}"
+            )
+            if ann.reasoning:
+                sections.append(f"  reasoning: {ann.reasoning}")
+            if ann.follow_up_question:
+                sections.append(f"  follow-up: {ann.follow_up_question}")
+        sections.append("")
+
+    # Synthesis narrative
+    synthesis_narrative = state.get("synthesis_narrative", "")
+    if synthesis_narrative:
+        sections.append("## Synthesis")
+        sections.append(synthesis_narrative)
         sections.append("")
 
     # Surface errors prominently

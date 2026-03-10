@@ -47,6 +47,23 @@ _ORCHESTRATOR_PLAN_RESPONSE = json.dumps([{
 
 _ORCHESTRATOR_EVAL_RESPONSE = json.dumps([])
 
+_REVIEWER_RESPONSE = json.dumps([{
+    "finding_index": 0,
+    "finding_statement": "DRY_RUN: placeholder finding",
+    "assessment": "supported",
+    "reasoning": "Dry-run placeholder — no real review performed",
+    "suggested_action": "accept",
+    "follow_up_question": "",
+}])
+
+_SYNTHESIZER_RESPONSE = json.dumps({
+    "executive_summary": "DRY_RUN: Investigation exercised the full pipeline. "
+    "No real synthesis performed.",
+    "observations": [
+        {"section": "next_cycle_focus", "note": "Dry-run — no actionable observations."},
+    ],
+})
+
 
 class DryRunChatModel(BaseChatModel):
     """Fake LLM that returns canned responses and tracks token estimates."""
@@ -98,6 +115,10 @@ class DryRunChatModel(BaseChatModel):
             return self._orchestrator_response(messages)
         elif self.role == "investigator":
             return self._investigator_response(messages)
+        elif self.role == "reviewer":
+            return _REVIEWER_RESPONSE, []
+        elif self.role == "synthesizer":
+            return _SYNTHESIZER_RESPONSE, []
         else:
             return "Dry-run response — no real LLM call made.", []
 

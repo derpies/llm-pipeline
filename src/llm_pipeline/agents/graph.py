@@ -1,9 +1,10 @@
 """Top-level investigation cycle graph.
 
 Flow:
-    START → orchestrator_plan → [fan-out] investigate_{agent_type} → orchestrator_evaluate
-      → [_route_after_evaluate] → "synthesize" OR [fan-out] investigate_{agent_type} (LOOP)
-    synthesize → orchestrator_checkpoint → END (interrupt for human review)
+    START → orchestrator_plan → [fan-out] investigate_{agent_type} → review_findings
+      → orchestrator_evaluate → [_route_after_evaluate]
+      → "assemble_report" OR [fan-out] investigate_{agent_type} (LOOP)
+    assemble_report → synthesize_narrative → orchestrator_checkpoint → END
 """
 
 from __future__ import annotations
@@ -20,7 +21,9 @@ from llm_pipeline.agents.orchestrator import (
     orchestrator_plan,
 )
 from llm_pipeline.agents.registry import get_investigation_agents
+from llm_pipeline.agents.reviewer import review_findings
 from llm_pipeline.agents.state import InvestigationCycleState, InvestigatorState
+from llm_pipeline.agents.synthesizer import synthesize_narrative
 
 logger = logging.getLogger(__name__)
 
@@ -205,8 +208,8 @@ def _route_after_evaluate(
     ml_run_id = state.get("ml_run_id", "") or run_id
 
     if not topics:
-        logger.debug("routing to synthesize run_id=%s", run_id)
-        return "synthesize"
+        logger.debug("routing to assemble_report run_id=%s", run_id)
+        return "assemble_report"
 
     from llm_pipeline.agents.roles import get_role_grounding
 
@@ -239,7 +242,7 @@ def _route_after_evaluate(
     return sends
 
 
-def _synthesize(state: InvestigationCycleState) -> dict:
+def _assemble_report(state: InvestigationCycleState) -> dict:
     """Build structured investigation report from ML data and findings.
 
     Deterministic assembly — no LLM calls. Delegates to the active domain's
@@ -310,8 +313,10 @@ def build_investigation_graph():
 
     # Nodes
     graph.add_node("orchestrator_plan", orchestrator_plan)
+    graph.add_node("review_findings", review_findings)
     graph.add_node("orchestrator_evaluate", orchestrator_evaluate)
-    graph.add_node("synthesize", _synthesize)
+    graph.add_node("assemble_report", _assemble_report)
+    graph.add_node("synthesize_narrative", synthesize_narrative)
     graph.add_node("orchestrator_checkpoint", orchestrator_checkpoint)
 
     # Register one node per discovered investigation agent
@@ -328,16 +333,19 @@ def build_investigation_graph():
     graph.add_edge(START, "orchestrator_plan")
     graph.add_conditional_edges("orchestrator_plan", _route_investigations)
 
-    # All investigation nodes → orchestrator_evaluate
+    # All investigation nodes → review_findings → orchestrator_evaluate
     for agent_name in agents:
-        graph.add_edge(f"investigate_{agent_name}", "orchestrator_evaluate")
+        graph.add_edge(f"investigate_{agent_name}", "review_findings")
+
+    graph.add_edge("review_findings", "orchestrator_evaluate")
 
     graph.add_conditional_edges(
         "orchestrator_evaluate",
         _route_after_evaluate,
-        {"synthesize": "synthesize"},
+        {"assemble_report": "assemble_report"},
     )
-    graph.add_edge("synthesize", "orchestrator_checkpoint")
+    graph.add_edge("assemble_report", "synthesize_narrative")
+    graph.add_edge("synthesize_narrative", "orchestrator_checkpoint")
     graph.add_edge("orchestrator_checkpoint", END)
 
     return graph.compile()

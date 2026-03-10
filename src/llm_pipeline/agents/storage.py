@@ -70,6 +70,7 @@ def store_investigation_results(
     is_dry_run: bool = False,
     ml_run_id: str | None = None,
     quality_warnings: list[str] | None = None,
+    source_files: list[str] | None = None,
 ) -> None:
     """Persist investigation results to Postgres (atomic commit)."""
     logger.info(
@@ -97,6 +98,7 @@ def store_investigation_results(
             is_dry_run=is_dry_run,
             ml_run_id=ml_run_id,
             quality_warnings=json.dumps(run_warnings),
+            source_files=json.dumps(source_files or []),
         )
         session.add(run)
 
@@ -272,6 +274,7 @@ def load_investigation(run_id: str, *, label: str | None = None) -> dict | None:
             "is_dry_run": getattr(run, "is_dry_run", False),
             "ml_run_id": getattr(run, "ml_run_id", None),
             "quality_warnings": _safe_json_loads(getattr(run, "quality_warnings", "[]"), []),
+            "source_files": _safe_json_loads(getattr(run, "source_files", "[]"), []),
         }
 
 
@@ -288,6 +291,7 @@ def write_investigation_markdown(
     output_dir: Path | None = None,
     status: str = "success",
     is_dry_run: bool = False,
+    source_files: list[str] | None = None,
 ) -> Path:
     """Write investigation results to a human-readable markdown file.
 
@@ -318,6 +322,8 @@ def write_investigation_markdown(
     lines.append(f"**Status:** {status.upper()}")
     if is_dry_run:
         lines.append("**Mode:** DRY RUN (no real LLM calls)")
+    if source_files:
+        lines.append(f"**Source Files:** {', '.join(source_files)}")
     lines.append(f"**Started:** {started_at:%Y-%m-%d %H:%M:%S UTC}")
     lines.append(f"**Completed:** {completed:%Y-%m-%d %H:%M:%S UTC}")
     lines.append(f"**Duration:** {mins}m {secs}s")

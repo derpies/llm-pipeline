@@ -38,6 +38,7 @@ class InvestigationRunRecord(Base):
     is_dry_run: Mapped[bool] = mapped_column(Boolean, default=False)
     ml_run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     quality_warnings: Mapped[str] = mapped_column(Text, default="[]")
+    source_files: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

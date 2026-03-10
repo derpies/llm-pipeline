@@ -308,6 +308,7 @@ class AnalysisReport(BaseModel):
     completed_at: datetime | None = None
     files_processed: int = 0
     events_parsed: int = 0
+    source_files: list[str] = Field(default_factory=list)
     aggregations: list[AggregationBucket] = Field(default_factory=list)
     completeness: list[DataCompleteness] = Field(default_factory=list)
     anomalies: list[AnomalyFinding] = Field(default_factory=list)
@@ -418,6 +419,7 @@ class AnalysisRunRecord(Base):
     anomaly_count: Mapped[int] = mapped_column(Integer, default=0)
     trend_count: Mapped[int] = mapped_column(Integer, default=0)
     errors: Mapped[str] = mapped_column(Text, default="")
+    source_files: Mapped[str] = mapped_column(Text, default="[]")
 
 
 

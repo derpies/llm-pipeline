@@ -76,6 +76,30 @@ class GeneratedDocument(BaseModel):
     created_at: datetime
 
 
+class ReviewAssessment(enum.StrEnum):
+    SUPPORTED = "supported"
+    WEAK_EVIDENCE = "weak_evidence"
+    CONTRADICTED = "contradicted"
+    GAP_IDENTIFIED = "gap_identified"
+
+
+class ReviewAction(enum.StrEnum):
+    ACCEPT = "accept"
+    INVESTIGATE_FURTHER = "investigate_further"
+    FLAG_FOR_HUMAN = "flag_for_human"
+
+
+class ReviewAnnotation(BaseModel):
+    """Reviewer's assessment of a single finding."""
+
+    finding_index: int
+    finding_statement: str
+    assessment: ReviewAssessment
+    reasoning: str
+    suggested_action: ReviewAction
+    follow_up_question: str = ""
+
+
 class AnalyticalStrategy(BaseModel):
     """A generalized investigation approach derived from findings."""
 
