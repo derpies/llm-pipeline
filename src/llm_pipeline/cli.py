@@ -830,5 +830,21 @@ def regenerate_report(
     typer.echo(f"\n{generated} report(s) regenerated.")
 
 
+def _register_plugin_commands() -> None:
+    """Auto-register CLI commands from pipeline agent plugins."""
+    try:
+        from llm_pipeline.agents.registry import get_pipeline_agents
+
+        for name, manifest in get_pipeline_agents().items():
+            if manifest.cli_command and manifest.cli_handler:
+                app.command(name=manifest.cli_command)(manifest.cli_handler)
+    except Exception:
+        # Don't crash CLI startup if plugin discovery fails
+        pass
+
+
+_register_plugin_commands()
+
+
 if __name__ == "__main__":
     app()

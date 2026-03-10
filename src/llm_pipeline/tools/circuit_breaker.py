@@ -88,5 +88,11 @@ def check_budget(
     return json.dumps(result, indent=2)
 
 
-# Circuit breaker tools available to agents
+# --- Tool role declarations for auto-discovery ---
+TOOL_ROLES = [
+    (report_step,  ["investigator"]),
+    (check_budget, ["investigator"]),
+]
+
+# Legacy alias
 CIRCUIT_BREAKER_TOOLS = [report_step, check_budget]

@@ -53,4 +53,11 @@ def report_hypothesis(
     return tool_result(ToolStatus.OK, f"Hypothesis recorded: {statement} (reasoning: {reasoning})")
 
 
+# --- Tool role declarations for auto-discovery ---
+TOOL_ROLES = [
+    (report_finding,    ["investigator"]),
+    (report_hypothesis, ["investigator"]),
+]
+
+# Legacy alias
 REPORTING_TOOLS = [report_finding, report_hypothesis]

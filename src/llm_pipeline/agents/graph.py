@@ -1,8 +1,8 @@
 """Top-level investigation cycle graph.
 
 Flow:
-    START → orchestrator_plan → [fan-out] investigate_topic → orchestrator_evaluate
-      → [_route_after_evaluate] → "synthesize" OR [fan-out] investigate_topic (LOOP)
+    START → orchestrator_plan → [fan-out] investigate_{agent_type} → orchestrator_evaluate
+      → [_route_after_evaluate] → "synthesize" OR [fan-out] investigate_{agent_type} (LOOP)
     synthesize → orchestrator_checkpoint → END (interrupt for human review)
 """
 
@@ -14,113 +14,132 @@ import time
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
-from llm_pipeline.agents.investigator import build_investigator_graph
 from llm_pipeline.agents.orchestrator import (
     orchestrator_checkpoint,
     orchestrator_evaluate,
     orchestrator_plan,
 )
+from llm_pipeline.agents.registry import get_investigation_agents
 from llm_pipeline.agents.state import InvestigationCycleState, InvestigatorState
 
 logger = logging.getLogger(__name__)
 
-# Pre-compiled investigator subgraph
-_investigator_graph = build_investigator_graph()
+# Lazy-compiled graph cache per agent name
+_compiled_cache: dict[str, object] = {}
 
 
-def _investigate_topic(state: InvestigatorState) -> dict:
-    """Run a single investigator instance for one topic.
+def _make_investigate_runner(manifest):
+    """Create a runner function for an investigation agent.
 
-    Catches exceptions to prevent one failed investigator from crashing
-    the entire fan-out.
+    Uses lazy compilation — the agent's graph is compiled on first invocation.
     """
-    from datetime import UTC, datetime
+    def _run(state: InvestigatorState) -> dict:
+        from datetime import UTC, datetime
 
-    from llm_pipeline.agents.models import Finding, FindingStatus
+        from llm_pipeline.agents.models import Finding, FindingStatus
 
-    topic = state["topic"]
-    run_id = state.get("run_id", "")
-    logger.info(
-        "investigate_topic started run_id=%s topic=%s priority=%s",
-        run_id,
-        topic.title,
-        topic.priority,
-    )
-    t0 = time.monotonic()
-    try:
-        result = _investigator_graph.invoke(state)
-        findings = result.get("findings", [])
-        hypotheses = result.get("hypotheses", [])
-        elapsed = time.monotonic() - t0
+        topic = state["topic"]
+        run_id = state.get("run_id", "")
         logger.info(
-            "investigate_topic completed run_id=%s topic=%s "
-            "findings=%d hypotheses=%d elapsed_s=%.2f",
+            "investigate_%s started run_id=%s topic=%s priority=%s",
+            manifest.name,
             run_id,
             topic.title,
-            len(findings),
-            len(hypotheses),
-            elapsed,
+            topic.priority,
         )
-        return {
-            "findings": findings,
-            "hypotheses": hypotheses,
-            "digest_lines": result.get("digest_lines", []),
-            "completed_topics": [topic.title],
-            "topic_errors": [],
-        }
-    except Exception as e:
-        elapsed = time.monotonic() - t0
-        error_msg = f"{topic.title}: {type(e).__name__}: {e}"
-        logger.error(
-            "Investigator failed for topic '%s': %s elapsed_s=%.2f", topic.title, e, elapsed
-        )
-
-        # Salvage any findings/hypotheses reported before the crash
-        from llm_pipeline.agents.investigator import _extract_results
-
-        salvaged_findings: list[Finding] = []
-        salvaged_hypotheses = []
-        digest_lines: list[str] = [f"[error] Investigator crashed: {error_msg}"]
+        t0 = time.monotonic()
         try:
-            salvaged = _extract_results(state)
-            salvaged_findings = salvaged.get("findings", [])
-            salvaged_hypotheses = salvaged.get("hypotheses", [])
-            digest_lines.extend(salvaged.get("digest_lines", []))
-            if salvaged_findings:
-                logger.info(
-                    "Salvaged %d findings, %d hypotheses from crashed investigator '%s'",
-                    len(salvaged_findings),
-                    len(salvaged_hypotheses),
+            # Lazy compile
+            if manifest.name not in _compiled_cache:
+                _compiled_cache[manifest.name] = manifest.build_graph()
+            compiled = _compiled_cache[manifest.name]
+
+            result = compiled.invoke(state)
+            findings = result.get("findings", [])
+            hypotheses = result.get("hypotheses", [])
+            elapsed = time.monotonic() - t0
+            logger.info(
+                "investigate_%s completed run_id=%s topic=%s "
+                "findings=%d hypotheses=%d elapsed_s=%.2f",
+                manifest.name,
+                run_id,
+                topic.title,
+                len(findings),
+                len(hypotheses),
+                elapsed,
+            )
+            raw_output = {
+                "findings": findings,
+                "hypotheses": hypotheses,
+                "digest_lines": result.get("digest_lines", []),
+                "completed_topics": [topic.title],
+                "topic_errors": [],
+            }
+            if manifest.result_adapter:
+                return manifest.result_adapter.adapt(raw_output)
+            return raw_output
+        except Exception as e:
+            elapsed = time.monotonic() - t0
+            error_msg = f"{topic.title}: {type(e).__name__}: {e}"
+            logger.error(
+                "Investigator %s failed for topic '%s': %s elapsed_s=%.2f",
+                manifest.name,
+                topic.title,
+                e,
+                elapsed,
+            )
+
+            # Salvage any findings/hypotheses reported before the crash
+            from llm_pipeline.agents.plugins.investigator.extract import _extract_results
+
+            salvaged_findings: list[Finding] = []
+            salvaged_hypotheses = []
+            digest_lines: list[str] = [f"[error] Investigator crashed: {error_msg}"]
+            try:
+                salvaged = _extract_results(state)
+                salvaged_findings = salvaged.get("findings", [])
+                salvaged_hypotheses = salvaged.get("hypotheses", [])
+                digest_lines.extend(salvaged.get("digest_lines", []))
+                if salvaged_findings:
+                    logger.info(
+                        "Salvaged %d findings, %d hypotheses from crashed investigator '%s'",
+                        len(salvaged_findings),
+                        len(salvaged_hypotheses),
+                        topic.title,
+                    )
+            except Exception:
+                logger.debug(
+                    "Could not salvage findings from crashed investigator '%s'",
                     topic.title,
                 )
-        except Exception:
-            logger.debug("Could not salvage findings from crashed investigator '%s'", topic.title)
 
-        # If nothing was salvaged, create a fallback finding
-        if not salvaged_findings:
-            salvaged_findings = [
-                Finding(
-                    topic_title=topic.title,
-                    statement=f"Investigation failed: {type(e).__name__}: {e}",
-                    status=FindingStatus.INCONCLUSIVE,
-                    evidence=[],
-                    created_at=datetime.now(UTC),
-                    run_id=state.get("run_id", ""),
-                    tool_use_failed=True,
-                )
-            ]
+            # If nothing was salvaged, create a fallback finding
+            if not salvaged_findings:
+                salvaged_findings = [
+                    Finding(
+                        topic_title=topic.title,
+                        statement=f"Investigation failed: {type(e).__name__}: {e}",
+                        status=FindingStatus.INCONCLUSIVE,
+                        evidence=[],
+                        created_at=datetime.now(UTC),
+                        run_id=state.get("run_id", ""),
+                        tool_use_failed=True,
+                    )
+                ]
 
-        return {
-            "findings": salvaged_findings,
-            "hypotheses": salvaged_hypotheses,
-            "digest_lines": digest_lines,
-            "completed_topics": [topic.title],
-            "topic_errors": [error_msg],
-        }
+            return {
+                "findings": salvaged_findings,
+                "hypotheses": salvaged_hypotheses,
+                "digest_lines": digest_lines,
+                "completed_topics": [topic.title],
+                "topic_errors": [error_msg],
+            }
+
+    return _run
 
 
 def _route_investigations(state: InvestigationCycleState) -> list[Send]:
-    """Fan out: dispatch one investigator per topic."""
+    """Fan out: dispatch one investigator per topic, routing by agent_type."""
     from llm_pipeline.agents.roles import get_role_grounding
 
     topics = state.get("investigation_plan", [])
@@ -130,10 +149,12 @@ def _route_investigations(state: InvestigationCycleState) -> list[Send]:
 
     sends = []
     for topic in topics:
+        agent_name = getattr(topic, "agent_type", "investigator") or "investigator"
+        node_name = f"investigate_{agent_name}"
         grounding_context = get_role_grounding(topic.role)
         sends.append(
             Send(
-                "investigate_topic",
+                node_name,
                 {
                     "topic": topic,
                     "run_id": run_id,
@@ -196,10 +217,12 @@ def _route_after_evaluate(
 
     sends = []
     for topic in topics:
+        agent_name = getattr(topic, "agent_type", "investigator") or "investigator"
+        node_name = f"investigate_{agent_name}"
         grounding_context = get_role_grounding(topic.role)
         sends.append(
             Send(
-                "investigate_topic",
+                node_name,
                 {
                     "topic": topic,
                     "run_id": run_id,
@@ -269,20 +292,37 @@ def _synthesize(state: InvestigationCycleState) -> dict:
 
 
 def build_investigation_graph():
-    """Build and compile the top-level investigation cycle graph."""
+    """Build and compile the top-level investigation cycle graph.
+
+    Dynamically registers one node per discovered investigation agent plugin.
+    """
+    agents = get_investigation_agents()
     graph = StateGraph(InvestigationCycleState)
 
     # Nodes
     graph.add_node("orchestrator_plan", orchestrator_plan)
-    graph.add_node("investigate_topic", _investigate_topic)
     graph.add_node("orchestrator_evaluate", orchestrator_evaluate)
     graph.add_node("synthesize", _synthesize)
     graph.add_node("orchestrator_checkpoint", orchestrator_checkpoint)
 
+    # Register one node per discovered investigation agent
+    for agent_name, manifest in agents.items():
+        node_name = f"investigate_{agent_name}"
+        graph.add_node(node_name, _make_investigate_runner(manifest))
+
+    # Fallback: if no agents discovered, add a default investigate_investigator node
+    # (shouldn't happen in practice but prevents graph build errors)
+    if not agents:
+        logger.warning("No investigation agents discovered — graph may not function correctly")
+
     # Edges
     graph.add_edge(START, "orchestrator_plan")
     graph.add_conditional_edges("orchestrator_plan", _route_investigations)
-    graph.add_edge("investigate_topic", "orchestrator_evaluate")
+
+    # All investigation nodes → orchestrator_evaluate
+    for agent_name in agents:
+        graph.add_edge(f"investigate_{agent_name}", "orchestrator_evaluate")
+
     graph.add_conditional_edges(
         "orchestrator_evaluate",
         _route_after_evaluate,

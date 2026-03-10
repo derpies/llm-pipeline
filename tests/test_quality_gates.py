@@ -396,7 +396,11 @@ class TestNormalizationLogging:
 class TestInvestigateTopicErrorHandling:
 
     def test_exception_produces_fallback_finding(self):
-        from llm_pipeline.agents.graph import _investigate_topic
+        from llm_pipeline.agents.graph import _compiled_cache, _make_investigate_runner
+        from llm_pipeline.agents.registry import get_agent
+
+        manifest = get_agent("investigator")
+        runner = _make_investigate_runner(manifest)
 
         topic = _make_topic(title="Crashing Topic")
         state = {
@@ -409,9 +413,13 @@ class TestInvestigateTopicErrorHandling:
             "prior_context": "",
         }
 
-        with patch("llm_pipeline.agents.graph._investigator_graph") as mock_graph:
-            mock_graph.invoke.side_effect = RuntimeError("LLM exploded")
-            result = _investigate_topic(state)
+        mock_compiled = MagicMock()
+        mock_compiled.invoke.side_effect = RuntimeError("LLM exploded")
+        _compiled_cache["investigator"] = mock_compiled
+        try:
+            result = runner(state)
+        finally:
+            _compiled_cache.pop("investigator", None)
 
         assert len(result["findings"]) == 1
         f = result["findings"][0]
@@ -422,7 +430,11 @@ class TestInvestigateTopicErrorHandling:
         assert result["completed_topics"] == ["Crashing Topic"]
 
     def test_exception_surfaces_in_digest_and_errors(self):
-        from llm_pipeline.agents.graph import _investigate_topic
+        from llm_pipeline.agents.graph import _compiled_cache, _make_investigate_runner
+        from llm_pipeline.agents.registry import get_agent
+
+        manifest = get_agent("investigator")
+        runner = _make_investigate_runner(manifest)
 
         topic = _make_topic(title="Error Topic")
         state = {
@@ -435,9 +447,13 @@ class TestInvestigateTopicErrorHandling:
             "prior_context": "",
         }
 
-        with patch("llm_pipeline.agents.graph._investigator_graph") as mock_graph:
-            mock_graph.invoke.side_effect = ValueError("bad data")
-            result = _investigate_topic(state)
+        mock_compiled = MagicMock()
+        mock_compiled.invoke.side_effect = ValueError("bad data")
+        _compiled_cache["investigator"] = mock_compiled
+        try:
+            result = runner(state)
+        finally:
+            _compiled_cache.pop("investigator", None)
 
         assert any("[error]" in d for d in result["digest_lines"])
         assert len(result["topic_errors"]) == 1

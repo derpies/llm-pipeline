@@ -335,6 +335,12 @@ def _parse_topics(content: str) -> list[InvestigationTopic]:
         _PRIORITY_MAP = {"critical": "high", "urgent": "high", "normal": "medium", "minor": "low"}
         _VALID_PRIORITIES = {"high", "medium", "low"}
         _VALID_ROLES = {r.value for r in InvestigatorRole}
+
+        # Get valid agent types from registry
+        from llm_pipeline.agents.registry import get_investigation_agents
+
+        _VALID_AGENT_TYPES = set(get_investigation_agents().keys())
+
         if isinstance(data, list):
             for item in data:
                 if isinstance(item, dict):
@@ -346,6 +352,11 @@ def _parse_topics(content: str) -> list[InvestigationTopic]:
                         r = str(item["role"]).lower()
                         if r not in _VALID_ROLES:
                             item["role"] = InvestigatorRole.DIAGNOSTICS.value
+                    # Coerce invalid agent_type to default
+                    if "agent_type" in item:
+                        at = str(item["agent_type"]).lower()
+                        if _VALID_AGENT_TYPES and at not in _VALID_AGENT_TYPES:
+                            item["agent_type"] = "investigator"
         adapter = TypeAdapter(list[InvestigationTopic])
         return adapter.validate_python(data)
     except (json.JSONDecodeError, Exception) as e:

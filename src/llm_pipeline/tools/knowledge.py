@@ -5,6 +5,7 @@ import time
 
 from langchain_core.tools import tool
 
+from llm_pipeline.config import settings
 from llm_pipeline.knowledge.models import KnowledgeScope
 from llm_pipeline.tools.result import ToolStatus, tool_result
 
@@ -59,3 +60,10 @@ def retrieve_knowledge(
         time.monotonic() - t0,
     )
     return tool_result(ToolStatus.OK, "\n\n".join(lines))
+
+
+# --- Tool role declarations for auto-discovery ---
+# Conditional: only available to investigators when knowledge store is enabled
+TOOL_ROLES = [
+    (retrieve_knowledge, ["investigator"] if settings.investigator_use_knowledge_store else []),
+]

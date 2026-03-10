@@ -442,7 +442,17 @@ def compare_dimensions(
     return tool_result(ToolStatus.OK, json.dumps(result, indent=2))
 
 
-# Tool registries per agent role
+# --- Tool role declarations for auto-discovery ---
+TOOL_ROLES = [
+    (get_aggregations,      ["investigator"]),
+    (get_anomalies,         ["investigator", "orchestrator"]),
+    (get_trends,            ["investigator", "orchestrator"]),
+    (get_ml_report_summary, ["investigator", "orchestrator"]),
+    (get_data_completeness, ["investigator"]),
+    (compare_dimensions,    ["investigator"]),
+]
+
+# Legacy aliases — kept for backward compatibility during transition
 ORCHESTRATOR_ML_TOOLS = [get_ml_report_summary, get_anomalies, get_trends]
 INVESTIGATOR_ML_TOOLS = [
     get_aggregations,

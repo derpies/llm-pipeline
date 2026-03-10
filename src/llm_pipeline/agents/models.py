@@ -39,6 +39,7 @@ class InvestigationTopic(BaseModel):
     priority: InvestigationPriority = InvestigationPriority.MEDIUM
     context: str = ""
     role: InvestigatorRole = InvestigatorRole.DIAGNOSTICS
+    agent_type: str = "investigator"  # which agent plugin handles this topic
 
 
 class Hypothesis(BaseModel):

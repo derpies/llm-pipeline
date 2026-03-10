@@ -9,7 +9,7 @@ from llm_pipeline.agents.prompts import CHAT_SYSTEM_PROMPT
 from llm_pipeline.models.llm import get_llm
 from llm_pipeline.models.rate_limiter import get_rate_limiter
 from llm_pipeline.models.token_tracker import get_tracker
-from llm_pipeline.tools.common import CHAT_TOOLS
+from llm_pipeline.tools.registry import get_tools
 
 
 def _should_continue(state: MessagesState) -> str:
@@ -22,7 +22,7 @@ def _should_continue(state: MessagesState) -> str:
 
 def _call_model(state: MessagesState) -> dict:
     """Invoke the LLM with the current message history."""
-    llm = get_llm().bind_tools(CHAT_TOOLS)
+    llm = get_llm().bind_tools(get_tools("chat"))
     messages = [SystemMessage(content=CHAT_SYSTEM_PROMPT)] + state["messages"]
     get_rate_limiter().acquire()
     response = llm.invoke(messages)
@@ -40,7 +40,7 @@ def build_chat_graph():
     graph = StateGraph(MessagesState)
 
     graph.add_node("agent", _call_model)
-    graph.add_node("tools", ToolNode(CHAT_TOOLS))
+    graph.add_node("tools", ToolNode(get_tools("chat")))
 
     graph.add_edge(START, "agent")
     graph.add_conditional_edges("agent", _should_continue, {"tools": "tools", END: END})

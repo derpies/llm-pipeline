@@ -33,7 +33,13 @@ def retrieve_documents(query: str) -> str:
     return tool_result(ToolStatus.OK, "\n\n---\n\n".join(results))
 
 
-# Chat agent tools — the legacy tool set
+# --- Tool role declarations for auto-discovery ---
+TOOL_ROLES = [
+    (get_current_datetime, ["*"]),       # available to all roles
+    (retrieve_documents,   ["chat"]),
+]
+
+# Legacy alias
 CHAT_TOOLS: list = [
     get_current_datetime,
     retrieve_documents,
