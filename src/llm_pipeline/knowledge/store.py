@@ -59,7 +59,7 @@ def get_weaviate_client() -> weaviate.WeaviateClient:
 
 def _get_db_session() -> Session:
     """Create a new SQLAlchemy session for audit trail."""
-    from llm_pipeline.email_analytics.storage import get_engine
+    from llm_pipeline.models.db import get_engine
 
     return Session(get_engine())
 

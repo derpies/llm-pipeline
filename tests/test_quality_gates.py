@@ -18,12 +18,11 @@ from llm_pipeline.agents.models import (
     Hypothesis,
     InvestigationTopic,
 )
-from llm_pipeline.email_analytics.models import (
+from llm_pipeline.agents.storage_models import (
     InvestigationFindingRecord,
     InvestigationRunRecord,
     InvestigationRunStatus,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

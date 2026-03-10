@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import TypeAdapter
 
-from llm_pipeline.agents.models import CircuitBreakerBudget, InvestigatorRole, InvestigationTopic
+from llm_pipeline.agents.models import CircuitBreakerBudget, InvestigationTopic
 from llm_pipeline.agents.prompts import ORCHESTRATOR_SYSTEM_PROMPT
 from llm_pipeline.agents.state import InvestigationCycleState
 from llm_pipeline.config import settings
@@ -20,6 +20,20 @@ from llm_pipeline.models.token_tracker import get_tracker
 from llm_pipeline.tools.circuit_breaker import check_budget_exceeded
 
 logger = logging.getLogger(__name__)
+
+
+def _get_orchestrator_prompt() -> str:
+    """Build the orchestrator system prompt with domain-specific role descriptions."""
+    from llm_pipeline.agents.domain_registry import get_active_domain
+
+    domain = get_active_domain()
+    if domain and domain.orchestrator_role_prompt:
+        role_descriptions = domain.orchestrator_role_prompt
+    else:
+        role_descriptions = (
+            '- role: Which specialist to assign. Default to "diagnostics" if unclear.'
+        )
+    return ORCHESTRATOR_SYSTEM_PROMPT.format(domain_role_descriptions=role_descriptions)
 
 
 def orchestrator_plan(state: InvestigationCycleState) -> dict:
@@ -76,7 +90,7 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
     get_rate_limiter().acquire()
     response = llm.invoke(
         [
-            SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
+            SystemMessage(content=_get_orchestrator_prompt()),
             HumanMessage(content=prompt),
         ]
     )
@@ -210,7 +224,7 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
         get_rate_limiter().acquire()
         response = llm.invoke(
             [
-                SystemMessage(content=ORCHESTRATOR_SYSTEM_PROMPT),
+                SystemMessage(content=_get_orchestrator_prompt()),
                 HumanMessage(content=eval_prompt),
             ]
         )
@@ -334,7 +348,10 @@ def _parse_topics(content: str) -> list[InvestigationTopic]:
         # Coerce unknown priority values to valid enum values
         _PRIORITY_MAP = {"critical": "high", "urgent": "high", "normal": "medium", "minor": "low"}
         _VALID_PRIORITIES = {"high", "medium", "low"}
-        _VALID_ROLES = {r.value for r in InvestigatorRole}
+        # Get valid roles from active domain
+        from llm_pipeline.agents.domain_registry import get_domain_roles
+
+        _VALID_ROLES = set(get_domain_roles().keys())
 
         # Get valid agent types from registry
         from llm_pipeline.agents.registry import get_investigation_agents
@@ -351,7 +368,7 @@ def _parse_topics(content: str) -> list[InvestigationTopic]:
                     if "role" in item:
                         r = str(item["role"]).lower()
                         if r not in _VALID_ROLES:
-                            item["role"] = InvestigatorRole.DIAGNOSTICS.value
+                            item["role"] = "diagnostics"
                     # Coerce invalid agent_type to default
                     if "agent_type" in item:
                         at = str(item["agent_type"]).lower()

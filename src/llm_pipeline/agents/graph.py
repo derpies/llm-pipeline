@@ -242,10 +242,10 @@ def _route_after_evaluate(
 def _synthesize(state: InvestigationCycleState) -> dict:
     """Build structured investigation report from ML data and findings.
 
-    Deterministic assembly — no LLM calls. Produces a fixed-schema
-    InvestigationReport (Document 1 + Document 2).
+    Deterministic assembly — no LLM calls. Delegates to the active domain's
+    report_builder if one exists, otherwise returns findings as-is.
     """
-    from llm_pipeline.agents.report_builder import assemble_full_report
+    from llm_pipeline.agents.domain_registry import get_active_domain
 
     ml_report = state.get("ml_report")
     run_id = state.get("run_id", "")
@@ -261,7 +261,16 @@ def _synthesize(state: InvestigationCycleState) -> dict:
             ],
         }
 
-    report = assemble_full_report(
+    domain = get_active_domain()
+    if domain is None or domain.report_builder is None:
+        logger.warning("synthesize: no domain report builder, skipping report assembly")
+        return {
+            "digest_lines": [
+                f"[synthesize] No report builder; {len(findings)} findings ready"
+            ],
+        }
+
+    report = domain.report_builder(
         run_id=run_id,
         ml_run_id=ml_report.run_id,
         ml_report=ml_report,

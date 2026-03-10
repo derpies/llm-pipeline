@@ -1,9 +1,9 @@
-"""Contracts for pluggable agents and investigation output."""
+"""Contracts for pluggable agents, investigation output, and domain manifests."""
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from typing_extensions import TypedDict
@@ -56,3 +56,36 @@ class AgentManifest:
     description: str = ""
     cli_command: str | None = None
     cli_handler: Callable[..., Any] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Domain manifest — contract for pluggable domain implementations
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RoleDefinition:
+    """A specialist investigator role provided by a domain."""
+
+    name: str  # e.g. "reputation"
+    prompt_supplement: str  # appended to investigator system prompt
+    grounding_queries: list[str] = field(default_factory=list)
+    grounding_kb_prefixes: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DomainManifest:
+    """Contract for a pluggable domain.
+
+    Parallel to AgentManifest but for domain-specific content:
+    investigator roles, domain prompts, report builders, and CLI commands.
+    """
+
+    name: str  # e.g. "email_delivery"
+    description: str
+    roles: list[RoleDefinition] = field(default_factory=list)
+    investigator_domain_prompt: str = ""  # domain knowledge for investigator
+    orchestrator_role_prompt: str = ""  # role descriptions for orchestrator
+    report_builder: Callable[..., Any] | None = None  # assemble_full_report equivalent
+    report_renderer: Callable[..., Any] | None = None  # render_markdown equivalent
+    cli_commands: list[Callable[..., Any]] | None = None  # Typer command functions

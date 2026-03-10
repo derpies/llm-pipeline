@@ -20,14 +20,6 @@ class FindingStatus(enum.StrEnum):
     INCONCLUSIVE = "inconclusive"
 
 
-class InvestigatorRole(enum.StrEnum):
-    REPUTATION = "reputation"
-    COMPLIANCE = "compliance"
-    ENGAGEMENT = "engagement"
-    ISP = "isp"
-    DIAGNOSTICS = "diagnostics"
-
-
 class InvestigationTopic(BaseModel):
     """A focused topic for an investigator agent to examine."""
 
@@ -38,7 +30,7 @@ class InvestigationTopic(BaseModel):
     question: str
     priority: InvestigationPriority = InvestigationPriority.MEDIUM
     context: str = ""
-    role: InvestigatorRole = InvestigatorRole.DIAGNOSTICS
+    role: str = "diagnostics"  # validated against active domain's roles at runtime
     agent_type: str = "investigator"  # which agent plugin handles this topic
 
 
