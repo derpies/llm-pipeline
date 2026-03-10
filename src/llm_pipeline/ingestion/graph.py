@@ -61,7 +61,7 @@ def _review(state: IngestionState) -> dict:
 
 
 def _store(state: IngestionState) -> dict:
-    """Store approved chunks in ChromaDB."""
+    """Store approved chunks in the vector store."""
     if not state.get("approved", False):
         return {"errors": ["Storage not approved"]}
 

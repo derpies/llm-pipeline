@@ -1,14 +1,8 @@
-"""Tool registry and built-in tools for the agent."""
-
-from datetime import UTC, datetime
+"""retrieve_documents tool."""
 
 from langchain_core.tools import tool
 
-
-@tool
-def get_current_datetime() -> str:
-    """Get the current date and time in UTC."""
-    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+from llm_pipeline.tools.result import ToolStatus, tool_result
 
 
 @tool
@@ -22,17 +16,10 @@ def retrieve_documents(query: str) -> str:
 
     docs = retrieve(query)
     if not docs:
-        return "No relevant documents found in the knowledge base."
+        return tool_result(ToolStatus.EMPTY, "No relevant documents found in the knowledge base.")
 
     results = []
     for i, doc in enumerate(docs, 1):
         source = doc.metadata.get("source", "unknown")
         results.append(f"[{i}] (source: {source})\n{doc.page_content}")
-    return "\n\n---\n\n".join(results)
-
-
-# Tool registry — add new tools here
-TOOLS: list = [
-    get_current_datetime,
-    retrieve_documents,
-]
+    return tool_result(ToolStatus.OK, "\n\n---\n\n".join(results))

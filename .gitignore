@@ -12,6 +12,9 @@ build/
 # Data
 chroma_data/
 
+# ignore local copies of KB
+docs/grounding/external-kb/
+
 # IDE
 .vscode/
 .idea/
