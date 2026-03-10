@@ -1,16 +1,8 @@
-"""Shared tools available to all agents."""
-
-from datetime import UTC, datetime
+"""retrieve_documents tool."""
 
 from langchain_core.tools import tool
 
 from llm_pipeline.tools.result import ToolStatus, tool_result
-
-
-@tool
-def get_current_datetime() -> str:
-    """Get the current date and time in UTC."""
-    return tool_result(ToolStatus.OK, datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"))
 
 
 @tool
@@ -31,16 +23,3 @@ def retrieve_documents(query: str) -> str:
         source = doc.metadata.get("source", "unknown")
         results.append(f"[{i}] (source: {source})\n{doc.page_content}")
     return tool_result(ToolStatus.OK, "\n\n---\n\n".join(results))
-
-
-# --- Tool role declarations for auto-discovery ---
-TOOL_ROLES = [
-    (get_current_datetime, ["*"]),       # available to all roles
-    (retrieve_documents,   ["chat"]),
-]
-
-# Legacy alias
-CHAT_TOOLS: list = [
-    get_current_datetime,
-    retrieve_documents,
-]

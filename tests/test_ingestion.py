@@ -260,7 +260,7 @@ class TestRetrieveDocumentsTool:
         ]
         mock_get_vs.return_value = mock_vs
 
-        from llm_pipeline.tools.common import retrieve_documents
+        from llm_pipeline.tools.rag import retrieve_documents
 
         result = retrieve_documents.invoke({"query": "test query"})
         assert "[1]" in result
@@ -273,7 +273,7 @@ class TestRetrieveDocumentsTool:
         mock_vs.similarity_search.return_value = []
         mock_get_vs.return_value = mock_vs
 
-        from llm_pipeline.tools.common import retrieve_documents
+        from llm_pipeline.tools.rag import retrieve_documents
 
         result = retrieve_documents.invoke({"query": "nonexistent"})
         assert "No relevant documents" in result

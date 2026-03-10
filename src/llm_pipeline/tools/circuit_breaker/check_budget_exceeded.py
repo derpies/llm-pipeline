@@ -1,16 +1,11 @@
-"""Circuit breaker tools for controlling investigation cycles."""
+"""check_budget_exceeded — non-tool helper for programmatic budget checks."""
 
 from __future__ import annotations
 
-import logging
 import time
-
-from langchain_core.tools import tool
 
 from llm_pipeline.agents.models import CircuitBreakerBudget
 from llm_pipeline.models.token_tracker import get_tracker
-
-logger = logging.getLogger(__name__)
 
 
 def check_budget_exceeded(
@@ -50,49 +45,3 @@ def check_budget_exceeded(
         },
         "reasons": reasons,
     }
-
-
-@tool
-def report_step(step_description: str) -> str:
-    """Log a single investigation step for the checkpoint digest.
-
-    Args:
-        step_description: One-line description of what was done or found.
-    """
-    logger.info("Investigation step: %s", step_description)
-    return f"Logged: {step_description}"
-
-
-@tool
-def check_budget(
-    iteration_count: int,
-    started_at_timestamp: float,
-    max_iterations: int = 5,
-    max_seconds: int = 300,
-) -> str:
-    """Check remaining investigation budget.
-
-    Args:
-        iteration_count: Current iteration number.
-        started_at_timestamp: Unix timestamp when the cycle started.
-        max_iterations: Max allowed iterations.
-        max_seconds: Max allowed seconds.
-    """
-    import json
-
-    budget = CircuitBreakerBudget(
-        max_iterations=max_iterations,
-        max_seconds=max_seconds,
-    )
-    result = check_budget_exceeded(iteration_count, started_at_timestamp, budget)
-    return json.dumps(result, indent=2)
-
-
-# --- Tool role declarations for auto-discovery ---
-TOOL_ROLES = [
-    (report_step,  ["investigator"]),
-    (check_budget, ["investigator"]),
-]
-
-# Legacy alias
-CIRCUIT_BREAKER_TOOLS = [report_step, check_budget]

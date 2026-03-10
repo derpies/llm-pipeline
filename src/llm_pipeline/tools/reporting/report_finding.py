@@ -1,4 +1,4 @@
-"""Reporting tools — structured output from investigators."""
+"""report_finding tool."""
 
 from __future__ import annotations
 
@@ -31,33 +31,5 @@ def report_finding(
     logger.info("Finding reported: [%s] %s", status, statement)
     return tool_result(
         ToolStatus.OK,
-        f"Finding recorded: [{status}] {statement} "
-        f"(evidence={evidence}, metrics={metrics_cited})",
+        f"Finding recorded: [{status}] {statement} (evidence={evidence}, metrics={metrics_cited})",
     )
-
-
-@tool
-def report_hypothesis(
-    statement: str,
-    reasoning: str,
-) -> str:
-    """Report an untested hypothesis for future investigation.
-
-    Call this for ideas you formed but could not test within this investigation.
-
-    Args:
-        statement: The hypothesis — what you think might be true.
-        reasoning: Why you think this — what evidence or pattern led you here.
-    """
-    logger.info("Hypothesis reported: %s", statement)
-    return tool_result(ToolStatus.OK, f"Hypothesis recorded: {statement} (reasoning: {reasoning})")
-
-
-# --- Tool role declarations for auto-discovery ---
-TOOL_ROLES = [
-    (report_finding,    ["investigator"]),
-    (report_hypothesis, ["investigator"]),
-]
-
-# Legacy alias
-REPORTING_TOOLS = [report_finding, report_hypothesis]
