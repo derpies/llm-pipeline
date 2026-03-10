@@ -1,28 +1,30 @@
 # knowledge/
 
-Knowledge store infrastructure — **not yet implemented** (Phase B).
+Four-tier knowledge store backed by Weaviate (vectors) and Postgres (audit trail). Stores, deduplicates, promotes, and retrieves investigation findings across confidence tiers.
 
-This directory will hold the tiered knowledge storage and retrieval system.
-It's a placeholder now, but the structure is defined in CLAUDE.md.
-
-## Planned files
+## Files
 
 | File | Purpose |
 |------|---------|
-| `store.py` | Tier-aware write operations (store hypothesis, store finding, etc.) |
-| `retrieval.py` | Tier-weighted vector search (truth > findings > hypotheses) |
-| `models.py` | SQLAlchemy + Pydantic models for knowledge items, audit trail |
-| `promotion.py` | Promotion/demotion logic (finding → truth, deprecation) |
+| `__init__.py` | Package marker |
+| `models.py` | Pydantic + SQLAlchemy models: KnowledgeTier, KnowledgeScope, KnowledgeEntry subclasses, confidence computation, Postgres audit record |
+| `weaviate_schema.py` | Collection definitions (4 tiers + SummarizationDocument + RagDocument), multi-tenant config, lazy client init |
+| `store.py` | Write path: store_entry with cosine-similarity dedup, promote_to_finding/truth, deprecate, Postgres audit trail |
+| `retrieval.py` | Read path: tier-weighted retrieval (Grounded 1.0x > Truth 0.85x > Finding 0.6x > Hypothesis 0.3x), dual-scope queries |
+| `import_grounded.py` | Import grounding corpus (markdown files) into Weaviate Grounded tier, splitting on ## headings |
 
-## How it connects
+## Key Concepts
 
-```
-tools/knowledge.py          <-- thin @tool wrappers (LLM-callable)
-    └─ knowledge/store.py   <-- actual storage logic
-    └─ knowledge/retrieval.py
-        └─ Postgres (pgvector) + ChromaDB
-```
+**Tier hierarchy** — hypothesis < finding < truth < grounded. Knowledge promotes upward through evidence accumulation and human review. Lower tiers are rebuildable; grounded tier is read-only (external corpus).
 
-`tools/knowledge.py` is what agents call. This directory is the
-implementation those tools delegate to. The separation means you can
-test and evolve the storage layer independently of the tool interface.
+**Scopes** — `community` (aggregate, cross-account patterns) and `account` (per-account isolation). Implemented via Weaviate multi-tenancy: tenant = account_id or "community".
+
+**Deduplication** — On write, cosine similarity > 0.95 with matching topic/dimension triggers merge_observation (update existing entry) rather than creating a duplicate.
+
+**Confidence scoring** — `weighted_score = similarity * tier_weight * confidence`. Tier weight ensures grounded knowledge outranks hypotheses even at equal vector similarity. Confidence incorporates observation count and temporal span.
+
+## Contracts
+
+- **Imports from**: `email_analytics.models` (SQLAlchemy Base for audit table), `config` (Weaviate/Postgres URLs)
+- **Exports**: `store_entry`, `promote_to_finding`, `promote_to_truth`, `deprecate`, `retrieve_knowledge`, `retrieve_for_account`, knowledge model classes
+- **Consumed by**: `agents/storage.py` (investigation → knowledge conversion), `tools/knowledge/` (LLM-callable retrieval), `cli.py` (knowledge search/stats commands)
