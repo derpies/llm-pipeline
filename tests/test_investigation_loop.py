@@ -11,7 +11,6 @@ from llm_pipeline.agents.models import (
     FindingStatus,
     Hypothesis,
     InvestigationTopic,
-    InvestigatorRole,
 )
 
 # ---------------------------------------------------------------------------
@@ -924,16 +923,15 @@ class TestInvestigatorRole:
 
     def test_investigation_topic_defaults_to_diagnostics(self):
         topic = _make_topic()
-        assert topic.role == InvestigatorRole.DIAGNOSTICS
+        assert topic.role == "diagnostics"
 
     def test_investigation_topic_accepts_valid_role(self):
         topic = _make_topic(role="reputation")
-        assert topic.role == InvestigatorRole.REPUTATION
+        assert topic.role == "reputation"
 
     def test_role_prompt_supplement_injected_in_call_investigator(self):
         """_call_investigator should include the role's prompt supplement in the system message."""
         from llm_pipeline.agents.investigator import _call_investigator
-        from llm_pipeline.agents.roles import ROLE_PROMPT_SUPPLEMENTS
 
         mock_response = AIMessage(content="I will investigate.")
         mock_response.usage_metadata = {"input_tokens": 100, "output_tokens": 50}
@@ -962,7 +960,6 @@ class TestInvestigatorRole:
             call_args = mock_llm.invoke.call_args[0][0]
             system_msg = call_args[0]
             assert "reputation specialist" in system_msg.content.lower()
-            assert ROLE_PROMPT_SUPPLEMENTS[InvestigatorRole.REPUTATION] in system_msg.content
 
     def test_grounding_context_injected_in_brief(self):
         """_call_investigator should include grounding_context in the brief."""
@@ -1005,7 +1002,7 @@ class TestInvestigatorRole:
                   '"priority": "high", "context": "ctx", "role": "compliance"}]'
         topics = _parse_topics(content)
         assert len(topics) == 1
-        assert topics[0].role == InvestigatorRole.COMPLIANCE
+        assert topics[0].role == "compliance"
 
     def test_orchestrator_parse_topics_invalid_role_defaults_to_diagnostics(self):
         from llm_pipeline.agents.orchestrator import _parse_topics
@@ -1015,7 +1012,7 @@ class TestInvestigatorRole:
                   '"priority": "high", "context": "ctx", "role": "invalid_role"}]'
         topics = _parse_topics(content)
         assert len(topics) == 1
-        assert topics[0].role == InvestigatorRole.DIAGNOSTICS
+        assert topics[0].role == "diagnostics"
 
     def test_orchestrator_parse_topics_missing_role_defaults_to_diagnostics(self):
         from llm_pipeline.agents.orchestrator import _parse_topics
@@ -1025,7 +1022,7 @@ class TestInvestigatorRole:
                   '"priority": "high", "context": "ctx"}]'
         topics = _parse_topics(content)
         assert len(topics) == 1
-        assert topics[0].role == InvestigatorRole.DIAGNOSTICS
+        assert topics[0].role == "diagnostics"
 
     def test_route_investigations_includes_grounding_context(self):
         """_route_investigations should pass grounding_context in Send payloads."""
@@ -1085,7 +1082,7 @@ class TestGetRoleGrounding:
         ]
 
         with patch("llm_pipeline.knowledge.retrieval.retrieve_knowledge", return_value=mock_results):
-            result = get_role_grounding(InvestigatorRole.COMPLIANCE, top_k=3)
+            result = get_role_grounding("compliance", top_k=3)
 
         assert "Authentication" in result
         assert "SPF validates sender IP" in result
@@ -1094,7 +1091,7 @@ class TestGetRoleGrounding:
         from llm_pipeline.agents.roles import get_role_grounding
 
         with patch("llm_pipeline.knowledge.retrieval.retrieve_knowledge", side_effect=Exception("conn err")):
-            result = get_role_grounding(InvestigatorRole.REPUTATION)
+            result = get_role_grounding("reputation")
 
         assert result == ""
 
@@ -1102,7 +1099,7 @@ class TestGetRoleGrounding:
         from llm_pipeline.agents.roles import get_role_grounding
 
         with patch("llm_pipeline.knowledge.retrieval.retrieve_knowledge", return_value=[]):
-            result = get_role_grounding(InvestigatorRole.ISP)
+            result = get_role_grounding("isp")
 
         assert result == ""
 
@@ -1125,7 +1122,7 @@ class TestGetRoleGrounding:
         ]
 
         with patch("llm_pipeline.knowledge.retrieval.retrieve_knowledge", return_value=mock_results):
-            result = get_role_grounding(InvestigatorRole.DIAGNOSTICS)
+            result = get_role_grounding("diagnostics")
 
         # Should be truncated to 300 chars (297 + "...")
         assert "..." in result

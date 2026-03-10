@@ -63,7 +63,7 @@ class TestListInvestigations:
     @patch("llm_pipeline.agents.storage.get_engine")
     def test_returns_correct_structure(self, mock_get_engine):
         from llm_pipeline.agents.storage import list_investigations
-        from llm_pipeline.email_analytics.models import InvestigationRunRecord
+        from llm_pipeline.agents.storage_models import InvestigationRunRecord
 
         mock_engine = MagicMock()
         mock_get_engine.return_value = mock_engine
@@ -174,10 +174,10 @@ class TestWriteReportFilesLabel:
 class TestRegenerateReportFlow:
     @patch("llm_pipeline.agents.storage.store_investigation_report")
     @patch("llm_pipeline.agents.storage.write_investigation_report_files")
-    @patch("llm_pipeline.agents.report_builder.assemble_full_report")
+    @patch("llm_pipeline.domains.email_delivery.report_builder.assemble_full_report")
     @patch("llm_pipeline.email_analytics.storage.load_report")
     @patch("llm_pipeline.agents.storage.load_investigation")
-    @patch("llm_pipeline.email_analytics.storage.init_db")
+    @patch("llm_pipeline.models.db.init_db")
     def test_single_run_regeneration(
         self,
         mock_init_db,
@@ -208,11 +208,11 @@ class TestRegenerateReportFlow:
 
     @patch("llm_pipeline.agents.storage.store_investigation_report")
     @patch("llm_pipeline.agents.storage.write_investigation_report_files")
-    @patch("llm_pipeline.agents.report_builder.assemble_full_report")
+    @patch("llm_pipeline.domains.email_delivery.report_builder.assemble_full_report")
     @patch("llm_pipeline.email_analytics.storage.load_report")
     @patch("llm_pipeline.agents.storage.load_investigation")
     @patch("llm_pipeline.agents.storage.list_investigations")
-    @patch("llm_pipeline.email_analytics.storage.init_db")
+    @patch("llm_pipeline.models.db.init_db")
     def test_all_labels_regeneration(
         self,
         mock_init_db,
@@ -247,7 +247,7 @@ class TestRegenerateReportFlow:
         assert "2 report(s) regenerated" in result.output
 
     @patch("llm_pipeline.agents.storage.load_investigation")
-    @patch("llm_pipeline.email_analytics.storage.init_db")
+    @patch("llm_pipeline.models.db.init_db")
     def test_missing_run_id_exits_with_error(self, mock_init_db, mock_load_inv):
         from typer.testing import CliRunner
 
@@ -263,10 +263,10 @@ class TestRegenerateReportFlow:
 
     @patch("llm_pipeline.agents.storage.store_investigation_report")
     @patch("llm_pipeline.agents.storage.write_investigation_report_files")
-    @patch("llm_pipeline.agents.report_builder.assemble_full_report")
+    @patch("llm_pipeline.domains.email_delivery.report_builder.assemble_full_report")
     @patch("llm_pipeline.email_analytics.storage.load_report")
     @patch("llm_pipeline.agents.storage.load_investigation")
-    @patch("llm_pipeline.email_analytics.storage.init_db")
+    @patch("llm_pipeline.models.db.init_db")
     def test_missing_ml_report_skips(
         self,
         mock_init_db,
@@ -293,10 +293,10 @@ class TestRegenerateReportFlow:
 
     @patch("llm_pipeline.agents.storage.store_investigation_report")
     @patch("llm_pipeline.agents.storage.write_investigation_report_files")
-    @patch("llm_pipeline.agents.report_builder.assemble_full_report")
+    @patch("llm_pipeline.domains.email_delivery.report_builder.assemble_full_report")
     @patch("llm_pipeline.email_analytics.storage.load_report")
     @patch("llm_pipeline.agents.storage.load_investigation")
-    @patch("llm_pipeline.email_analytics.storage.init_db")
+    @patch("llm_pipeline.models.db.init_db")
     def test_label_flag_passes_to_load(
         self,
         mock_init_db,

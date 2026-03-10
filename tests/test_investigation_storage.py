@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 from llm_pipeline.agents.models import Finding, FindingStatus, Hypothesis
-from llm_pipeline.email_analytics.models import InvestigationFindingRecord  # noqa: I001
+from llm_pipeline.agents.storage_models import InvestigationFindingRecord  # noqa: I001
 
 # ---------------------------------------------------------------------------
 # Helpers

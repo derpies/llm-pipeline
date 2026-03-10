@@ -13,12 +13,12 @@ from sqlalchemy.orm import Session
 
 from llm_pipeline.agents.models import Finding, FindingStatus, Hypothesis
 from llm_pipeline.agents.report_models import InvestigationReport
-from llm_pipeline.email_analytics.models import (
+from llm_pipeline.agents.storage_models import (
     InvestigationFindingRecord,
     InvestigationHypothesisRecord,
     InvestigationRunRecord,
 )
-from llm_pipeline.email_analytics.storage import get_engine
+from llm_pipeline.models.db import get_engine
 
 logger = logging.getLogger(__name__)
 
@@ -420,7 +420,7 @@ def store_investigation_report(
 ) -> None:
     """Render and persist an InvestigationReport to Postgres."""
     from llm_pipeline.agents.report_renderer import render_json, render_markdown
-    from llm_pipeline.email_analytics.models import InvestigationReportRecord
+    from llm_pipeline.agents.storage_models import InvestigationReportRecord
 
     logger.info("store_investigation_report started run_id=%s", run_id)
     t0 = time.monotonic()
@@ -452,7 +452,7 @@ def load_investigation_report(run_id: str) -> InvestigationReport | None:
     from sqlalchemy import select as sa_select
 
     from llm_pipeline.agents.report_models import InvestigationReport
-    from llm_pipeline.email_analytics.models import InvestigationReportRecord
+    from llm_pipeline.agents.storage_models import InvestigationReportRecord
 
     engine = get_engine()
     with Session(engine) as session:
