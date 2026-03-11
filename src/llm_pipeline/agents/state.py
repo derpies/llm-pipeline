@@ -16,6 +16,7 @@ from llm_pipeline.agents.models import (
     GeneratedDocument,
     Hypothesis,
     InvestigationTopic,
+    ReviewAnnotation,
 )
 
 
@@ -50,10 +51,14 @@ class InvestigationCycleState(TypedDict, total=False):
     prior_findings: list[Finding]
     prior_hypotheses: list[Hypothesis]
 
+    # Review
+    review_annotations: Annotated[list[ReviewAnnotation], operator.add]
+
     # Output
     documents: Annotated[list[GeneratedDocument], operator.add]
     strategies: Annotated[list[AnalyticalStrategy], operator.add]
     checkpoint_digest: str
+    synthesis_narrative: str
     report: Any  # InvestigationReport from report_builder
 
 

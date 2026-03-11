@@ -44,6 +44,7 @@ def store_results(report: AnalysisReport) -> None:
             anomaly_count=len(report.anomalies),
             trend_count=len(report.trends),
             errors=json.dumps(report.errors),
+            source_files=json.dumps(report.source_files),
         )
         session.add(run)
 
@@ -275,6 +276,7 @@ def load_report(run_id: str) -> AnalysisReport | None:
         ]
 
         errors = json.loads(run.errors) if run.errors else []
+        source_files = json.loads(getattr(run, "source_files", "[]") or "[]")
 
         return AnalysisReport(
             run_id=run.run_id,
@@ -282,6 +284,7 @@ def load_report(run_id: str) -> AnalysisReport | None:
             completed_at=run.completed_at,
             files_processed=run.files_processed,
             events_parsed=run.events_parsed,
+            source_files=source_files,
             aggregations=aggregations,
             completeness=completeness,
             anomalies=anomalies,

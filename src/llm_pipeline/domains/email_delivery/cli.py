@@ -30,7 +30,10 @@ def analyze_email(
     ] = False,
 ) -> None:
     """Analyze email delivery data — aggregate, detect anomalies, find trends."""
+    from datetime import UTC, datetime
+
     run_id = str(uuid.uuid4())
+    started_at = datetime.now(UTC)
     setup_logging(command="analyze_email", run_id=run_id)
     reset_tracker()
     reset_rate_limiter()
@@ -86,6 +89,29 @@ def analyze_email(
     if tracker.call_count > 0:
         typer.echo(f"\nLLM spend: {tracker.summary()}")
 
+    # Append manifest entry
+    try:
+        from llm_pipeline.agents.manifest import append_manifest
+
+        completed_at = datetime.now(UTC)
+        summary = (
+            f"{len(report.anomalies)} anomalies, {len(report.trends)} trends "
+            f"across {report.files_processed} files ({report.events_parsed} events)"
+        )
+        append_manifest(
+            run_id=run_id,
+            command="analyze_email",
+            source_files=report.source_files,
+            started_at=started_at,
+            completed_at=completed_at,
+            status="success",
+            summary=summary,
+            cost_usd=tracker.total_cost_usd,
+            output_files=[],
+        )
+    except Exception as e:
+        typer.echo(f"Warning: failed to write manifest: {e}")
+
 
 def investigate(
     path: Annotated[Path, typer.Argument(help="File or directory of email delivery JSON data")],
@@ -115,7 +141,10 @@ def investigate(
     ] = False,
 ) -> None:
     """Run the investigation cycle — ML analysis → agent investigation → findings."""
+    from datetime import UTC, datetime
+
     run_id = str(uuid.uuid4())
+    inv_started_at = datetime.now(UTC)
     setup_logging(command="investigate", run_id=run_id)
     reset_tracker()
     reset_rate_limiter()
@@ -204,6 +233,9 @@ def investigate(
     else:
         run_status = "success"
 
+    source_files = report.source_files
+    output_file_paths: list[str] = []
+
     try:
         store_investigation_results(
             run_id=run_id,
@@ -217,6 +249,7 @@ def investigate(
             status=run_status,
             is_dry_run=dry_run,
             ml_run_id=ml_run_id,
+            source_files=source_files,
         )
         typer.echo(
             f"\nPersisted [{run_status}]: {len(findings)} findings, "
@@ -239,7 +272,9 @@ def investigate(
             spend_summary=get_tracker().summary(),
             status=run_status,
             is_dry_run=dry_run,
+            source_files=source_files,
         )
+        output_file_paths.append(str(md_path))
         typer.echo(f"Report: {md_path}")
     except Exception as e:
         typer.echo(f"Warning: failed to write markdown report: {e}")
@@ -257,6 +292,8 @@ def investigate(
             json_path, rpt_md_path = write_investigation_report_files(
                 run_id=run_id, report=inv_report
             )
+            output_file_paths.append(str(json_path))
+            output_file_paths.append(str(rpt_md_path))
             typer.echo(f"Structured report: {json_path}")
             typer.echo(f"Structured report: {rpt_md_path}")
         except Exception as e:
@@ -281,6 +318,36 @@ def investigate(
         typer.echo(", ".join(parts))
     except Exception as e:
         typer.echo(f"Warning: failed to store to knowledge hierarchy: {e}")
+
+    # Append manifest entry
+    try:
+        from llm_pipeline.agents.manifest import append_manifest
+
+        inv_completed_at = datetime.now(UTC)
+        tracker = get_tracker()
+
+        # Build summary line
+        confirmed = [f for f in findings if f.status.value == "confirmed"]
+        top_finding = confirmed[0].statement[:80] if confirmed else ""
+        manifest_summary = f"{len(confirmed)} confirmed, {len(hypotheses)} hypotheses"
+        if top_finding:
+            manifest_summary += f" — {top_finding}"
+
+        append_manifest(
+            run_id=run_id,
+            command="investigate",
+            source_files=source_files,
+            started_at=inv_started_at,
+            completed_at=inv_completed_at,
+            status=run_status,
+            summary=manifest_summary,
+            cost_usd=tracker.total_cost_usd,
+            output_files=output_file_paths,
+            label=label,
+            ml_run_id=ml_run_id or "",
+        )
+    except Exception as e:
+        typer.echo(f"Warning: failed to write manifest: {e}")
 
     typer.echo(f"\nLLM spend: {get_tracker().summary()}")
 

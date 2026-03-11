@@ -27,9 +27,31 @@ services:
         condition: service_healthy
       weaviate:
         condition: service_healthy
+      production-mcp:
+        condition: service_healthy
     stdin_open: true
     tty: true
     command: sleep infinity
+    networks:
+      - llmpipe-net
+
+  api:
+    container_name: llmpipe-api
+    build: .
+    volumes:
+      - .:/app
+      - llmpipe-uv-cache:/root/.cache/uv
+      - ./output:/data/output
+    env_file:
+      - .env
+    ports:
+      - "20005:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+    command: uv run uvicorn llm_pipeline.api.main:app --host 0.0.0.0 --port 8000
     networks:
       - llmpipe-net
 
@@ -76,6 +98,21 @@ services:
       start_period: 15s
     networks:
       - llmpipe-net
+
+  production-mcp:
+    container_name: llmpipe-production-mcp
+    build:
+      context: ./mcp-server
+    env_file:
+      - .env.production-mcp
+    networks:
+      - llmpipe-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/mcp')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   redis:
     container_name: llmpipe-redis

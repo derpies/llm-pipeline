@@ -1,10 +1,10 @@
 """Datetime utilities available to all agents."""
 
-from llm_pipeline.tools.datetime.get_current_datetime import get_current_datetime
+from llm_pipeline.tools.datetime.manipulate_datetime import manipulate_datetime
 
 # --- Tool role declarations for auto-discovery ---
 TOOL_ROLES = [
-    (get_current_datetime, ["*"]),
+    (manipulate_datetime, ["*"]),
 ]
 
-__all__ = ["get_current_datetime", "TOOL_ROLES"]
+__all__ = ["manipulate_datetime", "TOOL_ROLES"]

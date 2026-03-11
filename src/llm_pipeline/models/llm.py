@@ -9,6 +9,7 @@ _ROLE_MODEL_MAP = {
     "orchestrator": "model_orchestrator",
     "investigator": "model_investigator",
     "investigator_deep": "model_investigator_deep",
+    "reviewer": "model_reviewer",
     "synthesizer": "model_synthesizer",
     "curator": "model_curator",
 }

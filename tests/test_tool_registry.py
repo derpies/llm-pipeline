@@ -28,7 +28,7 @@ class TestToolRegistry:
         assert "report_step" in names
         assert "check_budget" in names
         # Should include wildcard tools
-        assert "get_current_datetime" in names
+        assert "manipulate_datetime" in names
 
     def test_discovers_chat_tools(self):
         from llm_pipeline.tools.registry import get_tools
@@ -37,7 +37,7 @@ class TestToolRegistry:
         names = {t.name for t in tools}
         assert "retrieve_documents" in names
         # Wildcard tools
-        assert "get_current_datetime" in names
+        assert "manipulate_datetime" in names
 
     def test_discovers_orchestrator_tools(self):
         from llm_pipeline.tools.registry import get_tools
@@ -48,14 +48,14 @@ class TestToolRegistry:
         assert "get_trends" in names
         assert "get_ml_report_summary" in names
         # Wildcard
-        assert "get_current_datetime" in names
+        assert "manipulate_datetime" in names
 
     def test_wildcard_tools_always_present(self):
         from llm_pipeline.tools.registry import get_tools
 
         tools = get_tools("some_unknown_role")
         names = {t.name for t in tools}
-        assert "get_current_datetime" in names
+        assert "manipulate_datetime" in names
 
     def test_no_duplicates(self):
         from llm_pipeline.tools.registry import get_tools
@@ -72,6 +72,17 @@ class TestToolRegistry:
         tools2 = get_tools("investigator")
         # Same tools should be discovered
         assert {t.name for t in tools1} == {t.name for t in tools2}
+
+    def test_production_tools_absent_when_disabled(self):
+        from llm_pipeline.tools.registry import get_tools
+
+        # production_mcp_enabled defaults to False, so no production tools
+        tools = get_tools("investigator")
+        names = {t.name for t in tools}
+        assert "redis__ping" not in names
+        assert "postgres__ping" not in names
+        assert "opensearch__ping" not in names
+        assert "s3__list_buckets" not in names
 
     def test_knowledge_tool_conditional_on_settings(self):
         from llm_pipeline.tools.registry import get_tools
