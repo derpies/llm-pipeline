@@ -28,7 +28,7 @@ class TestToolRegistry:
         assert "report_step" in names
         assert "check_budget" in names
         # Should include wildcard tools
-        assert "get_current_datetime" in names
+        assert "manipulate_datetime" in names
 
     def test_discovers_chat_tools(self):
         from llm_pipeline.tools.registry import get_tools
@@ -37,7 +37,7 @@ class TestToolRegistry:
         names = {t.name for t in tools}
         assert "retrieve_documents" in names
         # Wildcard tools
-        assert "get_current_datetime" in names
+        assert "manipulate_datetime" in names
 
     def test_discovers_orchestrator_tools(self):
         from llm_pipeline.tools.registry import get_tools
@@ -48,14 +48,14 @@ class TestToolRegistry:
         assert "get_trends" in names
         assert "get_ml_report_summary" in names
         # Wildcard
-        assert "get_current_datetime" in names
+        assert "manipulate_datetime" in names
 
     def test_wildcard_tools_always_present(self):
         from llm_pipeline.tools.registry import get_tools
 
         tools = get_tools("some_unknown_role")
         names = {t.name for t in tools}
-        assert "get_current_datetime" in names
+        assert "manipulate_datetime" in names
 
     def test_no_duplicates(self):
         from llm_pipeline.tools.registry import get_tools

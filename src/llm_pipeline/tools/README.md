@@ -45,7 +45,7 @@ tools/
 
   datetime/                # Shared utilities
     __init__.py            # TOOL_ROLES, re-exports
-    get_current_datetime.py
+    manipulate_datetime.py # All datetime ops: now, parse, format, shift, diff, range, tz, epoch
 
   rag/                     # RAG retrieval
     __init__.py

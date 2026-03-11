@@ -23,6 +23,7 @@ dependencies = [
     "weaviate-client>=4.9",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.34",
+    "python-dateutil>=2.9.0.post0",
 ]
 
 [project.scripts]

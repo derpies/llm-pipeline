@@ -796,7 +796,7 @@ class TestInvestigatorToolToggle:
             "get_ml_report_summary", "get_data_completeness", "compare_dimensions",
             "report_finding", "report_hypothesis",
             "report_step", "check_budget",
-            "get_current_datetime",  # wildcard
+            "manipulate_datetime",  # wildcard
         }
         assert expected <= tool_names
 

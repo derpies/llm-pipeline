@@ -64,7 +64,7 @@ TOOL_ROLES = [
 ```
 
 - List of `(tool_fn, role_list)` tuples. Not a dict — `StructuredTool` objects are not hashable.
-- `"*"` is a wildcard role — the tool is available to all roles (e.g., `get_current_datetime`).
+- `"*"` is a wildcard role — the tool is available to all roles (e.g., `manipulate_datetime`).
 - An empty role list `[]` means the tool is not available to anyone (useful for conditional inclusion).
 
 ### Built-in Roles
