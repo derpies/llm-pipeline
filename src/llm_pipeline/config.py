@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # Rate limiting
     rate_limit_tokens_per_minute: int = 25_000  # input tokens/min (Anthropic limit: 30K)
 
+    # Production MCP server
+    production_mcp_url: str = "http://production-mcp:8000/mcp"
+    production_mcp_enabled: bool = False
+
     # Logging
     log_level: str = "INFO"
     log_format: str = "dev"  # "dev" for pretty-print, "json" for structured

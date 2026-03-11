@@ -74,6 +74,10 @@ tools/
     get_ml_report_summary.py
     get_data_completeness.py
     compare_dimensions.py
+
+  production/              # MCP-backed production system access
+    __init__.py            # MCP client adapter, TOOL_ROLES
+    README.md              # Per-subpackage docs
 ```
 
 ## How to add a new tool
@@ -119,6 +123,14 @@ That's it. `get_tools("investigator")` automatically includes the new tool.
 3. Create `tools/my_domain/my_tool.py` with the `@tool` function
 
 The registry auto-discovers packages via `pkgutil.iter_modules`.
+
+### MCP-backed tools (production/)
+
+The `production/` package is different — it doesn't define `@tool` functions
+directly. Instead, it connects to an external MCP server that holds production
+credentials and exposes constrained operations. At import time (when enabled),
+it fetches the tool list from the MCP server and wraps them as LangChain
+`StructuredTool` objects in `TOOL_ROLES`. See `production/README.md` for details.
 
 ## Registry pattern explained
 
