@@ -71,6 +71,9 @@ def _migrate_add_columns(engine) -> None:
         "ALTER TABLE email_aggregations ADD COLUMN IF NOT EXISTS pre_edge_latency_max FLOAT",
         "ALTER TABLE email_aggregations ADD COLUMN IF NOT EXISTS delivery_time_p99 FLOAT",
         "ALTER TABLE email_aggregations ADD COLUMN IF NOT EXISTS delivery_time_max FLOAT",
+        # source_files columns
+        "ALTER TABLE email_analysis_runs ADD COLUMN IF NOT EXISTS source_files TEXT DEFAULT '[]'",
+        "ALTER TABLE investigation_runs ADD COLUMN IF NOT EXISTS source_files TEXT DEFAULT '[]'",
     ]
 
     with engine.connect() as conn:

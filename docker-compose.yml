@@ -33,6 +33,26 @@ services:
     networks:
       - llmpipe-net
 
+  api:
+    container_name: llmpipe-api
+    build: .
+    volumes:
+      - .:/app
+      - llmpipe-uv-cache:/root/.cache/uv
+      - ./output:/data/output
+    env_file:
+      - .env
+    ports:
+      - "20005:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      weaviate:
+        condition: service_healthy
+    command: uv run uvicorn llm_pipeline.api.main:app --host 0.0.0.0 --port 8000
+    networks:
+      - llmpipe-net
+
   postgres:
     container_name: llmpipe-postgres
     image: pgvector/pgvector:pg16
