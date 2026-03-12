@@ -137,8 +137,14 @@ def store_results(report: HttpAnalysisReport) -> None:
 
 def load_historical_aggregations(
     lookback_days: int | None = None,
+    exclude_run_id: str | None = None,
 ) -> list[HttpAggregationBucket]:
-    """Load historical HTTP aggregation records for baseline comparison."""
+    """Load historical HTTP aggregation records for baseline comparison.
+
+    Args:
+        lookback_days: How far back to look for historical data.
+        exclude_run_id: Run ID to exclude (typically the current run).
+    """
     from llm_pipeline.config import settings
 
     lookback_days = lookback_days or getattr(settings, "http_lookback_days", 7)
@@ -149,6 +155,8 @@ def load_historical_aggregations(
         stmt = select(HttpAggregationRecord).where(
             HttpAggregationRecord.time_window >= cutoff
         )
+        if exclude_run_id:
+            stmt = stmt.where(HttpAggregationRecord.run_id != exclude_run_id)
         rows = session.execute(stmt).scalars().all()
 
         return [

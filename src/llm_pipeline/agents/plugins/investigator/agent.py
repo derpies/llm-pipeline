@@ -21,6 +21,12 @@ from llm_pipeline.tools.result import ToolStatus, parse_tool_status
 
 logger = logging.getLogger(__name__)
 
+# Tools that are NOT ML query tools (used to build dynamic tool name list in brief)
+_NON_ML_TOOL_NAMES = {
+    "report_finding", "report_hypothesis", "retrieve_knowledge",
+    "log_step", "check_budget",
+}
+
 
 def _build_investigator_prompt(role_name: str, domain_name: str | None = None) -> str:
     """Build the investigator system prompt with domain knowledge and role supplement."""
@@ -133,9 +139,8 @@ def _call_investigator(state: InvestigatorState) -> dict:
             f"Question: {topic.question}",
             f"Context: {topic.context}",
             f"\nRun ID for all ML tool calls: {ml_run_id}",
-            f'(Pass run_id="{ml_run_id}" to every ML tool: get_aggregations, '
-            f"get_anomalies, get_trends, get_ml_report_summary, "
-            f"get_data_completeness, compare_dimensions)",
+            f'(Pass run_id="{ml_run_id}" to every ML tool: '
+            f'{", ".join(sorted(t.name for t in tools if t.name not in _NON_ML_TOOL_NAMES))})',
         ]
 
         # Inject prior context for follow-up rounds
@@ -152,6 +157,12 @@ def _call_investigator(state: InvestigatorState) -> dict:
             "\nUse the ML tools to examine the data. Form a hypothesis, test it, "
             "and report your findings using report_finding and report_hypothesis tools. "
             "You MUST call report_finding at least once before finishing."
+        )
+        brief_parts.append(
+            f"\nBUDGET: You have {settings.investigator_max_llm_calls} tool-call rounds. "
+            f"Reserve the last {settings.investigator_report_reserve} for "
+            f"report_finding/report_hypothesis. "
+            f"If you exhaust your budget without reporting, your work is lost."
         )
         brief = "\n".join(brief_parts)
         logger.info(
@@ -179,11 +190,48 @@ def _call_investigator(state: InvestigatorState) -> dict:
         domain_name = state.get("domain_name")
         system_prompt = _build_investigator_prompt(topic.role, domain_name=domain_name)
 
-        messages = [SystemMessage(content=system_prompt)] + state["messages"]
+        messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
+
+        # Mid-loop budget nudge: when remaining calls <= reserve, inject
+        # a forcing message to stop exploring and report findings.
+        from langchain_core.messages import AIMessage
+
+        calls_used = sum(1 for m in messages if isinstance(m, AIMessage))
+        remaining = settings.investigator_max_llm_calls - calls_used
+        if remaining <= settings.investigator_report_reserve:
+            nudge = (
+                f"BUDGET WARNING: You have used {calls_used} of "
+                f"{settings.investigator_max_llm_calls} rounds. "
+                f"Only {remaining} remain. STOP exploring data. "
+                f"Call report_finding NOW with what you have learned so far. "
+                f"If you do not call report_finding, all your work is lost."
+            )
+            messages.append(HumanMessage(content=nudge))
+            logger.info(
+                "investigator budget nudge injected run_id=%s topic=%s "
+                "calls_used=%d remaining=%d",
+                run_id, topic.title, calls_used, remaining,
+            )
 
     get_rate_limiter().acquire()
     t0 = time.monotonic()
-    response = llm.invoke(messages)
+    try:
+        response = llm.invoke(messages)
+    except Exception as exc:
+        elapsed = time.monotonic() - t0
+        logger.warning(
+            "investigator llm_call failed run_id=%s topic=%s messages=%d "
+            "elapsed_s=%.2f error=%s",
+            run_id, topic.title, len(messages), elapsed, exc,
+        )
+        # Return a text-only AIMessage so _should_continue routes to END
+        # and extract_results can salvage any findings from prior messages.
+        from langchain_core.messages import AIMessage
+
+        return {"messages": [AIMessage(
+            content=f"[LLM call failed: {type(exc).__name__}. "
+            f"Ending investigation with findings collected so far.]"
+        )]}
     elapsed = time.monotonic() - t0
     get_tracker().record(response, model=settings.model_investigator)
     usage = getattr(response, "usage_metadata", None)
@@ -203,12 +251,10 @@ def _call_investigator(state: InvestigatorState) -> dict:
 
 # Names of ML tools whose run_id must match the ML analysis run
 _ML_TOOL_NAMES = {
-    "get_aggregations",
-    "get_anomalies",
-    "get_trends",
-    "get_ml_report_summary",
-    "get_data_completeness",
-    "compare_dimensions",
+    "get_aggregations", "get_anomalies", "get_trends",
+    "get_ml_report_summary", "get_data_completeness", "compare_dimensions",
+    "get_http_aggregations", "get_http_anomalies", "get_http_trends",
+    "get_http_report_summary", "get_http_data_completeness", "compare_http_dimensions",
 }
 
 

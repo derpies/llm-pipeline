@@ -19,7 +19,7 @@ def get_data_completeness(
     dimension: str | None = None,
     dimension_value: str | None = None,
     field_name: str | None = None,
-    limit: int = 50,
+    limit: int = 20,
 ) -> str:
     """Retrieve data completeness metrics from an ML analysis run.
 
@@ -82,4 +82,4 @@ def get_data_completeness(
         len(results),
         time.monotonic() - t0,
     )
-    return tool_result(ToolStatus.OK, json.dumps(results, indent=2))
+    return tool_result(ToolStatus.OK, json.dumps(results))

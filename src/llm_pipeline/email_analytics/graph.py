@@ -99,7 +99,8 @@ def _detect_anomalies(state: EmailAnalyticsState) -> dict:
     try:
         from llm_pipeline.email_analytics.storage import load_historical_aggregations
 
-        historical = load_historical_aggregations()
+        run_id = state.get("run_id", "")
+        historical = load_historical_aggregations(exclude_run_id=run_id)
     except Exception as exc:
         logger.warning("Could not load historical data, skipping anomaly detection: %s", exc)
         return {"anomalies": []}

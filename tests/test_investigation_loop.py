@@ -795,7 +795,7 @@ class TestInvestigatorToolToggle:
             "get_aggregations", "get_anomalies", "get_trends",
             "get_ml_report_summary", "get_data_completeness", "compare_dimensions",
             "report_finding", "report_hypothesis",
-            "report_step", "check_budget",
+            "log_step", "check_budget",
             "manipulate_datetime",  # wildcard
         }
         assert expected <= tool_names

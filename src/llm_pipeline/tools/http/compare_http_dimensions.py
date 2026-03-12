@@ -96,4 +96,4 @@ def compare_http_dimensions(
         "tool compare_http_dimensions returned run_id=%s results=%d elapsed_s=%.2f",
         run_id, len(result), time.monotonic() - t0,
     )
-    return tool_result(ToolStatus.OK, json.dumps(result, indent=2))
+    return tool_result(ToolStatus.OK, json.dumps(result))

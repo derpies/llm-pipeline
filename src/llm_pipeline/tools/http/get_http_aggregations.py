@@ -18,7 +18,7 @@ def get_http_aggregations(
     run_id: str,
     dimension: str | None = None,
     dimension_value: str | None = None,
-    limit: int = 50,
+    limit: int = 20,
 ) -> str:
     """Retrieve HTTP aggregation data from an ML analysis run.
 
@@ -89,4 +89,4 @@ def get_http_aggregations(
         "tool get_http_aggregations returned run_id=%s results=%d elapsed_s=%.2f",
         run_id, len(results), time.monotonic() - t0,
     )
-    return tool_result(ToolStatus.OK, json.dumps(results, indent=2))
+    return tool_result(ToolStatus.OK, json.dumps(results))

@@ -139,14 +139,22 @@ def store_results(report: AnalysisReport) -> None:
 
 def load_historical_aggregations(
     lookback_days: int | None = None,
+    exclude_run_id: str | None = None,
 ) -> list[AggregationBucket]:
-    """Load historical aggregation records for baseline comparison."""
+    """Load historical aggregation records for baseline comparison.
+
+    Args:
+        lookback_days: How far back to look for historical data.
+        exclude_run_id: Run ID to exclude (typically the current run).
+    """
     lookback_days = lookback_days or settings.email_lookback_days
     engine = get_engine()
     cutoff = datetime.now(UTC) - timedelta(days=lookback_days)
 
     with Session(engine) as session:
         stmt = select(AggregationRecord).where(AggregationRecord.time_window >= cutoff)
+        if exclude_run_id:
+            stmt = stmt.where(AggregationRecord.run_id != exclude_run_id)
         rows = session.execute(stmt).scalars().all()
 
         return [

@@ -18,7 +18,7 @@ def get_http_data_completeness(
     run_id: str,
     dimension: str | None = None,
     field_name: str | None = None,
-    limit: int = 50,
+    limit: int = 20,
 ) -> str:
     """Retrieve HTTP data completeness metrics from an ML analysis run.
 
@@ -74,4 +74,4 @@ def get_http_data_completeness(
         "tool get_http_data_completeness returned run_id=%s results=%d elapsed_s=%.2f",
         run_id, len(results), time.monotonic() - t0,
     )
-    return tool_result(ToolStatus.OK, json.dumps(results, indent=2))
+    return tool_result(ToolStatus.OK, json.dumps(results))

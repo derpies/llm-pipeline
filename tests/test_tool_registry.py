@@ -25,7 +25,7 @@ class TestToolRegistry:
         assert "report_finding" in names
         assert "report_hypothesis" in names
         # Should include circuit breaker tools
-        assert "report_step" in names
+        assert "log_step" in names
         assert "check_budget" in names
         # Should include wildcard tools
         assert "manipulate_datetime" in names

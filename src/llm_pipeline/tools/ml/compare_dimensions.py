@@ -100,4 +100,4 @@ def compare_dimensions(
         len(result),
         time.monotonic() - t0,
     )
-    return tool_result(ToolStatus.OK, json.dumps(result, indent=2))
+    return tool_result(ToolStatus.OK, json.dumps(result))

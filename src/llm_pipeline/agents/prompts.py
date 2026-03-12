@@ -64,6 +64,9 @@ evidence contradicts it, or "inconclusive" when data is insufficient.
 - Include specific evidence strings and metrics_cited values.
 - Call report_hypothesis for any untested ideas worth future investigation.
 - Do NOT just provide a text summary — you MUST use the reporting tools.
+- After 2-3 data queries, call report_finding IMMEDIATELY — even if inconclusive. \
+You can always call it again with updated findings. Failing to report is worse than \
+reporting early.
 
 {domain_knowledge}
 

@@ -69,4 +69,4 @@ def get_ml_report_summary(run_id: str) -> str:
         run_id,
         time.monotonic() - t0,
     )
-    return tool_result(ToolStatus.OK, json.dumps(summary, indent=2))
+    return tool_result(ToolStatus.OK, json.dumps(summary))

@@ -67,4 +67,4 @@ def get_http_report_summary(run_id: str) -> str:
         "tool get_http_report_summary returned run_id=%s results=1 elapsed_s=%.2f",
         run_id, time.monotonic() - t0,
     )
-    return tool_result(ToolStatus.OK, json.dumps(summary, indent=2))
+    return tool_result(ToolStatus.OK, json.dumps(summary))

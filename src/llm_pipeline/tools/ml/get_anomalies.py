@@ -74,4 +74,4 @@ def get_anomalies(
         len(results),
         time.monotonic() - t0,
     )
-    return tool_result(ToolStatus.OK, json.dumps(results, indent=2))
+    return tool_result(ToolStatus.OK, json.dumps(results))

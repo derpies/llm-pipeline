@@ -59,7 +59,7 @@ tools/
   circuit_breaker/         # Cycle control
     __init__.py
     check_budget_exceeded.py   # Non-tool helper, re-exported
-    report_step.py
+    report_step.py         # log_step tool (progress logging)
     check_budget.py
 
   knowledge/               # Knowledge store queries
