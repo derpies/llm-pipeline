@@ -287,23 +287,21 @@ def _assemble_report(state: InvestigationCycleState) -> dict:
         digest_lines=digest_lines,
     )
 
+    issues_count = len(getattr(report.structured, "confirmed_issues", []))
+    hypotheses_count = len(getattr(report.notes, "hypotheses", []))
     logger.info(
-        "synthesize completed run_id=%s segments=%d issues=%d trends=%d",
+        "assemble_report completed run_id=%s issues=%d hypotheses=%d",
         run_id,
-        len(report.structured.segment_health),
-        len(report.structured.confirmed_issues),
-        report.structured.trend_summary.degrading_count
-        + report.structured.trend_summary.improving_count
-        + report.structured.trend_summary.stable_count,
+        issues_count,
+        hypotheses_count,
     )
 
     return {
         "report": report,
         "digest_lines": [
-            f"[synthesize] Report assembled: "
-            f"{len(report.structured.segment_health)} segments, "
-            f"{len(report.structured.confirmed_issues)} confirmed issues, "
-            f"{len(report.notes.hypotheses)} hypotheses"
+            f"[assemble_report] Report assembled: "
+            f"{issues_count} confirmed issues, "
+            f"{hypotheses_count} hypotheses"
         ],
     }
 

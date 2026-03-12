@@ -13,7 +13,7 @@ from llm_pipeline.email_analytics.models import AnalysisRunRecord
 router = APIRouter(tags=["runs"])
 
 
-def _run_to_dict(row, command: str) -> dict:
+def _run_to_dict(row, command: str, domain: str = "email_delivery") -> dict:
     """Map an ORM run record to a unified API dict."""
     source_files = []
     raw = getattr(row, "source_files", "[]")
@@ -23,9 +23,12 @@ def _run_to_dict(row, command: str) -> dict:
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # Prefer domain_name from record if available, fallback to passed default
+    resolved_domain = getattr(row, "domain_name", "") or domain
+
     base = {
         "run_id": row.run_id,
-        "domain": "email_delivery",
+        "domain": resolved_domain,
         "command": command,
         "created_at": getattr(row, "created_at", None) or getattr(row, "started_at", None),
         "source_files": source_files,
@@ -54,6 +57,7 @@ def _run_to_dict(row, command: str) -> dict:
                 "finding_count": row.finding_count,
                 "hypothesis_count": row.hypothesis_count,
                 "iteration_count": row.iteration_count,
+                "review_status": getattr(row, "review_status", "pending"),
             }
         )
 
@@ -66,6 +70,7 @@ def list_runs(
     domain: str | None = Query(None),
     command: str | None = Query(None),
     status: str | None = Query(None),
+    review_status: str | None = Query(None),
     source_file: str | None = Query(None),
     search: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
@@ -74,8 +79,8 @@ def list_runs(
     """List all pipeline runs (ML + investigation), unified and sorted."""
     runs = []
 
-    # ML runs
-    if command is None or command == "analyze_email":
+    # Email ML runs
+    if (command is None or command == "analyze_email") and (domain is None or domain == "email_delivery"):
         # status filter: ML runs don't have a status column, skip if status is set
         if status is None or status in (None, ""):
             ml_stmt = select(AnalysisRunRecord)
@@ -86,15 +91,37 @@ def list_runs(
 
             ml_rows = db.execute(ml_stmt).scalars().all()
             for row in ml_rows:
-                runs.append(_run_to_dict(row, "analyze_email"))
+                runs.append(_run_to_dict(row, "analyze_email", domain="email_delivery"))
+
+    # HTTP ML runs
+    if (command is None or command == "analyze_http") and (domain is None or domain == "http_analytics"):
+        if status is None or status in (None, ""):
+            from llm_pipeline.http_analytics.models import HttpAnalysisRunRecord
+
+            http_stmt = select(HttpAnalysisRunRecord)
+            if source_file:
+                http_stmt = http_stmt.where(HttpAnalysisRunRecord.source_files.contains(source_file))
+            if search:
+                http_stmt = http_stmt.where(HttpAnalysisRunRecord.run_id.contains(search))
+
+            try:
+                http_rows = db.execute(http_stmt).scalars().all()
+                for row in http_rows:
+                    runs.append(_run_to_dict(row, "analyze_http", domain="http_analytics"))
+            except Exception:
+                pass  # Table may not exist yet
 
     # Investigation runs
-    if command is None or command == "investigate":
+    if command is None or command in ("investigate", "investigate_http"):
         inv_stmt = select(InvestigationRunRecord)
+        if domain:
+            inv_stmt = inv_stmt.where(InvestigationRunRecord.domain_name == domain)
         if status == "dry_run":
             inv_stmt = inv_stmt.where(InvestigationRunRecord.is_dry_run.is_(True))
         elif status:
             inv_stmt = inv_stmt.where(InvestigationRunRecord.status == status)
+        if review_status:
+            inv_stmt = inv_stmt.where(InvestigationRunRecord.review_status == review_status)
         if source_file:
             inv_stmt = inv_stmt.where(InvestigationRunRecord.source_files.contains(source_file))
         if search:
@@ -107,7 +134,9 @@ def list_runs(
 
         inv_rows = db.execute(inv_stmt).scalars().all()
         for row in inv_rows:
-            runs.append(_run_to_dict(row, "investigate"))
+            inv_domain = getattr(row, "domain_name", "") or "email_delivery"
+            inv_command = "investigate_http" if inv_domain == "http_analytics" else "investigate"
+            runs.append(_run_to_dict(row, inv_command, domain=inv_domain))
 
     # Sort by created_at desc (handle None)
     def _sort_key(r):

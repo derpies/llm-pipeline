@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from llm_pipeline.api.routers import domains, investigations, knowledge, ml, runs
+from llm_pipeline.api.routers import domains, investigations, knowledge, ml, reviews, runs
 from llm_pipeline.models.db import init_db
 
 
@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="LLM Pipeline API",
-    description="Read-only API for the investigation dashboard",
+    description="API for the investigation dashboard",
     lifespan=lifespan,
 )
 
@@ -33,3 +33,4 @@ app.include_router(runs.router, prefix="/api")
 app.include_router(investigations.router, prefix="/api")
 app.include_router(ml.router, prefix="/api")
 app.include_router(knowledge.router, prefix="/api")
+app.include_router(reviews.router, prefix="/api")

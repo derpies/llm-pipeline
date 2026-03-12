@@ -89,6 +89,9 @@ class KnowledgeEntry(BaseModel):
     scope: KnowledgeScope = KnowledgeScope.COMMUNITY
     account_id: str = ""
 
+    # Domain isolation
+    domain_name: str = ""
+
     # Embedded text
     statement: str
     topic: str = ""
@@ -149,11 +152,13 @@ class HypothesisEntry(KnowledgeEntry):
         h: Any,
         scope: KnowledgeScope = KnowledgeScope.COMMUNITY,
         account_id: str = "",
+        domain_name: str = "",
     ) -> HypothesisEntry:
         """Create from an agents.models.Hypothesis."""
         entry = cls(
             scope=scope,
             account_id=account_id,
+            domain_name=domain_name,
             statement=h.statement,
             topic=h.topic_title,
             reasoning=h.reasoning,
@@ -178,11 +183,13 @@ class FindingEntry(KnowledgeEntry):
         f: Any,
         scope: KnowledgeScope = KnowledgeScope.COMMUNITY,
         account_id: str = "",
+        domain_name: str = "",
     ) -> FindingEntry:
         """Create from an agents.models.Finding."""
         entry = cls(
             scope=scope,
             account_id=account_id,
+            domain_name=domain_name,
             statement=f.statement,
             topic=f.topic_title,
             finding_status=f.status.value if hasattr(f.status, "value") else str(f.status),
@@ -216,6 +223,21 @@ class GroundedEntry(KnowledgeEntry):
 # ---------------------------------------------------------------------------
 # SQLAlchemy audit trail
 # ---------------------------------------------------------------------------
+
+
+class KnowledgeAnnotationRecord(Base):
+    """Human annotations attached to knowledge entries."""
+
+    __tablename__ = "knowledge_annotations"
+    __table_args__ = {"schema": "knowledge"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entry_id: Mapped[str] = mapped_column(String(64), index=True)
+    actor: Mapped[str] = mapped_column(String(256))
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class KnowledgeAuditRecord(Base):

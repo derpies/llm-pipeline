@@ -47,6 +47,7 @@ class KnowledgeResult:
     similarity: float = 0.0
     weighted_score: float = 0.0
     finding_status: str = ""
+    domain_name: str = ""
     source_run_ids: list[str] = field(default_factory=list)
 
 
@@ -65,6 +66,7 @@ def retrieve_knowledge(
     top_k: int = 10,
     min_confidence: float = 0.0,
     active_only: bool = True,
+    domain_name: str = "",
     client: "weaviate.WeaviateClient | None" = None,
 ) -> list[KnowledgeResult]:
     """Search knowledge store with tier-weighted scoring.
@@ -94,9 +96,15 @@ def retrieve_knowledge(
             ensure_tenant(client, collection_name, tenant_name)
             collection = client.collections.get(collection_name).with_tenant(tenant_name)
 
+            # Build optional domain filter
+            domain_filter = None
+            if domain_name:
+                domain_filter = wq.Filter.by_property("domain_name").equal(domain_name)
+
             results = collection.query.near_vector(
                 near_vector=vector,
                 limit=top_k,
+                filters=domain_filter,
                 return_metadata=["distance"],
                 return_properties=[
                     "entry_id",
@@ -110,6 +118,7 @@ def retrieve_knowledge(
                     "observation_count",
                     "status",
                     "source_run_ids",
+                    "domain_name",
                 ]
                 + (["finding_status"] if tier == KnowledgeTier.FINDING else []),
             )
@@ -153,6 +162,7 @@ def retrieve_knowledge(
                         similarity=similarity,
                         weighted_score=weighted_score,
                         finding_status=props.get("finding_status", ""),
+                        domain_name=props.get("domain_name", ""),
                         source_run_ids=props.get("source_run_ids") or [],
                     )
                 )
@@ -177,6 +187,7 @@ def retrieve_for_account(
     top_k: int = 10,
     min_confidence: float = 0.0,
     active_only: bool = True,
+    domain_name: str = "",
     client: "weaviate.WeaviateClient | None" = None,
 ) -> dict[str, list[KnowledgeResult]]:
     """Retrieve knowledge for both account and community scopes.
@@ -192,6 +203,7 @@ def retrieve_for_account(
         top_k=top_k,
         min_confidence=min_confidence,
         active_only=active_only,
+        domain_name=domain_name,
         client=client,
     )
 
@@ -202,6 +214,7 @@ def retrieve_for_account(
         top_k=top_k,
         min_confidence=min_confidence,
         active_only=active_only,
+        domain_name=domain_name,
         client=client,
     )
 

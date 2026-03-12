@@ -36,6 +36,55 @@ def _get_orchestrator_prompt(domain_name: str | None = None) -> str:
     return ORCHESTRATOR_SYSTEM_PROMPT.format(domain_role_descriptions=role_descriptions)
 
 
+def _append_aggregation_summary(lines: list[str], aggregations: list) -> None:
+    """Add a compact summary of aggregation data for the orchestrator."""
+    from collections import defaultdict
+
+    # Group by dimension, sum totals across values
+    dim_totals: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for b in aggregations:
+        dim_totals[b.dimension][b.dimension_value] += b.total
+
+    for dim, values in sorted(dim_totals.items()):
+        # Show top 5 values by volume
+        top = sorted(values.items(), key=lambda x: x[1], reverse=True)[:5]
+        total_all = sum(values.values())
+        parts = ", ".join(f"{v}={c} ({100*c/total_all:.0f}%)" for v, c in top)
+        lines.append(f"  {dim} (total={total_all}): {parts}")
+
+    # Also show notable rates from a few high-volume buckets
+    by_volume = sorted(aggregations, key=lambda b: b.total, reverse=True)
+    notable = []
+    for b in by_volume[:20]:
+        # Look for non-trivial error rates or interesting patterns
+        success_rate = getattr(b, "success_rate", None)
+        if success_rate is not None and success_rate < 0.5 and b.total >= 100:
+            notable.append(
+                f"  ! {b.dimension}={b.dimension_value}: success_rate={success_rate:.2f} (n={b.total})"
+            )
+    if notable:
+        lines.append("\nNotable low success rates:")
+        lines.extend(notable[:10])
+
+
+def _append_completeness_summary(lines: list[str], completeness: list) -> None:
+    """Add a compact summary of data completeness metrics."""
+    # Group by field_name, average the empty rates
+    from collections import defaultdict
+
+    field_rates: dict[str, list[float]] = defaultdict(list)
+    for c in completeness:
+        field_name = getattr(c, "field_name", None)
+        empty_rate = getattr(c, "empty_rate", None) or getattr(c, "zero_rate", None)
+        if field_name and empty_rate is not None and empty_rate > 0.1:
+            field_rates[field_name].append(empty_rate)
+
+    for field, rates in sorted(field_rates.items(), key=lambda x: -max(x[1])):
+        avg_rate = sum(rates) / len(rates)
+        if avg_rate > 0.1:
+            lines.append(f"  {field}: avg empty rate {avg_rate:.1%} across {len(rates)} dimensions")
+
+
 def orchestrator_plan(state: InvestigationCycleState) -> dict:
     """Read ML report summary, produce investigation topics."""
     report = state["ml_report"]
@@ -74,6 +123,17 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
                 f"  {t.direction.value}: {t.dimension}={t.dimension_value} "
                 f"({t.metric}: {t.start_value:.4f} → {t.end_value:.4f}, R²={t.r_squared:.3f})"
             )
+
+    # When no anomalies/trends, include aggregation highlights so LLM has data to reason about
+    if not report.anomalies and not report.trends and report.aggregations:
+        summary_lines.append("\nAggregation highlights (top dimensions by volume):")
+        _append_aggregation_summary(summary_lines, report.aggregations)
+
+    # Include completeness highlights if available
+    completeness = getattr(report, "completeness", [])
+    if completeness:
+        summary_lines.append("\nData completeness issues:")
+        _append_completeness_summary(summary_lines, completeness)
 
     summary = "\n".join(summary_lines)
 

@@ -16,6 +16,7 @@ def retrieve_knowledge(
     query: str,
     scope: str = "community",
     account_id: str = "",
+    domain_name: str = "",
 ) -> str:
     """Search the knowledge store for relevant findings, hypotheses, and truths.
 
@@ -27,13 +28,15 @@ def retrieve_knowledge(
         query: Natural language query describing what to search for.
         scope: "community" for aggregate knowledge, "account" for per-account.
         account_id: Required when scope is "account".
+        domain_name: Filter by domain (e.g. "email_delivery", "http_analytics").
+            Leave empty to search across all domains.
     """
-    logger.debug("tool retrieve_knowledge called query=%.80s scope=%s", query, scope)
+    logger.debug("tool retrieve_knowledge called query=%.80s scope=%s domain=%s", query, scope, domain_name)
     t0 = time.monotonic()
     from llm_pipeline.knowledge.retrieval import retrieve_knowledge as _retrieve
 
     scope_enum = KnowledgeScope.ACCOUNT if scope == "account" else KnowledgeScope.COMMUNITY
-    results = _retrieve(query=query, scope=scope_enum, account_id=account_id, top_k=5)
+    results = _retrieve(query=query, scope=scope_enum, account_id=account_id, domain_name=domain_name, top_k=5)
 
     if not results:
         logger.debug(

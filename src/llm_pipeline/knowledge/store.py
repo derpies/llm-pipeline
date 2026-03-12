@@ -90,6 +90,7 @@ def _entry_to_properties(entry: KnowledgeEntry) -> dict:
         "temporal_span_days": entry.temporal_span_days,
         "source_run_ids": entry.source_run_ids,
         "created_at": entry.created_at.isoformat(),
+        "domain_name": entry.domain_name,
     }
     if isinstance(entry, FindingEntry):
         props["finding_status"] = entry.finding_status
@@ -332,10 +333,28 @@ def promote_to_truth(
     try:
         # Load the finding from Weaviate to build truth entry if not provided
         if truth_entry is None:
-            finding_coll = client.collections.get(TIER_COLLECTIONS[KnowledgeTier.FINDING])
-            # Search by entry_id across tenants
-            # For now, require truth_entry to be passed
-            raise ValueError("truth_entry must be provided (finding lookup not yet implemented)")
+            obj = _find_object_by_entry_id(
+                client, TIER_COLLECTIONS[KnowledgeTier.FINDING], finding_id
+            )
+            if obj is None:
+                raise ValueError(f"Finding {finding_id} not found in Weaviate")
+            props = obj.properties
+            truth_entry = TruthEntry(
+                statement=props.get("statement", ""),
+                topic=props.get("topic", ""),
+                dimension=props.get("dimension", ""),
+                dimension_value=props.get("dimension_value", ""),
+                scope=KnowledgeScope(props.get("scope", "community")),
+                account_id=props.get("account_id", ""),
+                domain_name=props.get("domain_name", ""),
+                evidence=props.get("evidence", []) or [],
+                source_run_ids=props.get("source_run_ids", []) or [],
+                observation_count=int(props.get("observation_count", 1) or 1),
+                first_observed=datetime.fromisoformat(props["first_observed"])
+                if props.get("first_observed")
+                else datetime.now(UTC),
+                last_observed=datetime.now(UTC),
+            )
 
         truth_entry.promoted_from = finding_id
         truth_entry.human_reviewer = reviewer
@@ -616,6 +635,7 @@ def store_investigation_to_knowledge(
     run_id: str = "",
     scope: KnowledgeScope = KnowledgeScope.COMMUNITY,
     account_id: str = "",
+    domain_name: str = "",
     client: weaviate.WeaviateClient | None = None,
 ) -> dict[str, int]:
     """Convert investigation findings/hypotheses to knowledge entries and store.
@@ -643,7 +663,7 @@ def store_investigation_to_knowledge(
             filtered += 1
             continue
 
-        entry = FindingEntry.from_investigation_finding(f, scope=scope, account_id=account_id)
+        entry = FindingEntry.from_investigation_finding(f, scope=scope, account_id=account_id, domain_name=domain_name)
         if run_id:
             entry.source_run_ids = [run_id]
         try:
@@ -666,7 +686,7 @@ def store_investigation_to_knowledge(
             filtered += 1
             continue
 
-        entry = HypothesisEntry.from_investigation_hypothesis(h, scope=scope, account_id=account_id)
+        entry = HypothesisEntry.from_investigation_hypothesis(h, scope=scope, account_id=account_id, domain_name=domain_name)
         if run_id:
             entry.source_run_ids = [run_id]
         try:

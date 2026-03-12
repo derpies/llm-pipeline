@@ -131,7 +131,17 @@ def _extract_results(state: InvestigatorState) -> dict:
             topic.title,
         )
         last_message = state["messages"][-1]
-        content = last_message.content if hasattr(last_message, "content") else str(last_message)
+        raw_content = last_message.content if hasattr(last_message, "content") else str(last_message)
+        # content can be a list of blocks (text + tool_use) — extract text parts
+        if isinstance(raw_content, list):
+            text_parts = [
+                block.get("text", "") if isinstance(block, dict) else str(block)
+                for block in raw_content
+                if not (isinstance(block, dict) and block.get("type") == "tool_use")
+            ]
+            content = " ".join(p for p in text_parts if p).strip() or f"Investigation exhausted budget on: {topic.title}"
+        else:
+            content = raw_content
         finding = Finding(
             topic_title=topic.title,
             statement=content[:500] if len(content) > 500 else content,

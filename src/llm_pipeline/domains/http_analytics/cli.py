@@ -221,6 +221,7 @@ def investigate_http(
             is_dry_run=dry_run,
             ml_run_id=ml_run_id,
             source_files=source_files,
+            domain_name="http_analytics",
         )
         typer.echo(
             f"\nPersisted [{run_status}]: {len(findings)} findings, "
@@ -259,9 +260,9 @@ def investigate_http(
                 write_investigation_report_files,
             )
 
-            store_investigation_report(run_id=run_id, report=inv_report)
+            store_investigation_report(run_id=run_id, report=inv_report, domain_name="http_analytics")
             json_path, rpt_md_path = write_investigation_report_files(
-                run_id=run_id, report=inv_report
+                run_id=run_id, report=inv_report, domain_name="http_analytics"
             )
             output_file_paths.append(str(json_path))
             output_file_paths.append(str(rpt_md_path))
@@ -278,6 +279,7 @@ def investigate_http(
             findings=findings,
             hypotheses=hypotheses,
             run_id=run_id,
+            domain_name="http_analytics",
         )
         filtered = counts.get("filtered", 0)
         parts = [

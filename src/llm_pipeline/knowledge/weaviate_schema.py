@@ -48,6 +48,7 @@ _BASE_PROPERTIES = [
     wvc.Property(name="temporal_span_days", data_type=wvc.DataType.INT),
     wvc.Property(name="source_run_ids", data_type=wvc.DataType.TEXT_ARRAY),
     wvc.Property(name="created_at", data_type=wvc.DataType.TEXT),
+    wvc.Property(name="domain_name", data_type=wvc.DataType.TEXT),
 ]
 
 # Extra properties for Finding collection

@@ -71,6 +71,7 @@ def store_investigation_results(
     ml_run_id: str | None = None,
     quality_warnings: list[str] | None = None,
     source_files: list[str] | None = None,
+    domain_name: str = "",
 ) -> None:
     """Persist investigation results to Postgres (atomic commit)."""
     logger.info(
@@ -99,6 +100,7 @@ def store_investigation_results(
             ml_run_id=ml_run_id,
             quality_warnings=json.dumps(run_warnings),
             source_files=json.dumps(source_files or []),
+            domain_name=domain_name,
         )
         session.add(run)
 
@@ -122,6 +124,7 @@ def store_investigation_results(
                     metrics_cited=json.dumps(f.metrics_cited),
                     is_fallback=f.tool_use_failed,
                     quality_warnings=json.dumps(finding_warnings),
+                    domain_name=domain_name,
                 )
             )
 
@@ -141,6 +144,7 @@ def store_investigation_results(
                     topic_title=h.topic_title,
                     statement=h.statement,
                     reasoning=h.reasoning,
+                    domain_name=domain_name,
                 )
             )
 
@@ -420,19 +424,41 @@ def write_investigation_markdown(
     return path
 
 
+def _render_report(report, domain_name: str = "") -> tuple[str, str]:
+    """Render a report using the domain-specific renderer, returning (json, markdown)."""
+    from llm_pipeline.agents.domain_registry import get_domain
+
+    domain = get_domain(domain_name) if domain_name else None
+    if domain is not None and domain.report_renderer is not None:
+        report_md = domain.report_renderer(report)
+    else:
+        from llm_pipeline.agents.report_renderer import render_markdown
+
+        report_md = render_markdown(report)
+
+    # JSON: use Pydantic if available, else fall back to email renderer
+    if hasattr(report, "model_dump_json") and not domain_name:
+        # Backward compat: use domain-specific render_json for email (default)
+        from llm_pipeline.agents.report_renderer import render_json
+
+        report_json = render_json(report)
+    else:
+        report_json = report.model_dump_json(indent=2)
+    return report_json, report_md
+
+
 def store_investigation_report(
     run_id: str,
     report: InvestigationReport,
+    domain_name: str = "",
 ) -> None:
     """Render and persist an InvestigationReport to Postgres."""
-    from llm_pipeline.agents.report_renderer import render_json, render_markdown
     from llm_pipeline.agents.storage_models import InvestigationReportRecord
 
     logger.info("store_investigation_report started run_id=%s", run_id)
     t0 = time.monotonic()
 
-    report_json = render_json(report)
-    report_md = render_markdown(report)
+    report_json, report_md = _render_report(report, domain_name)
 
     engine = get_engine()
     with Session(engine) as session:
@@ -441,6 +467,7 @@ def store_investigation_report(
                 run_id=run_id,
                 report_json=report_json,
                 report_markdown=report_md,
+                domain_name=domain_name,
             )
         )
         session.commit()
@@ -480,12 +507,13 @@ def write_investigation_report_files(
     report: InvestigationReport,
     output_dir: Path | None = None,
     label: str = "",
+    domain_name: str = "",
 ) -> tuple[Path, Path]:
     """Write report JSON and markdown files to disk.
 
     Returns (json_path, md_path).
     """
-    from llm_pipeline.agents.report_renderer import render_json, render_markdown
+    report_json, report_md = _render_report(report, domain_name)
 
     out = output_dir or OUTPUT_DIR
     out.mkdir(parents=True, exist_ok=True)
@@ -494,8 +522,8 @@ def write_investigation_report_files(
     json_path = out / f"{prefix}-report.json"
     md_path = out / f"{prefix}-report.md"
 
-    json_path.write_text(render_json(report))
-    md_path.write_text(render_markdown(report))
+    json_path.write_text(report_json)
+    md_path.write_text(report_md)
 
     logger.info(
         "write_investigation_report_files run_id=%s json=%s md=%s",

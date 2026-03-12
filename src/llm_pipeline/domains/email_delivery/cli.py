@@ -250,6 +250,7 @@ def investigate(
             is_dry_run=dry_run,
             ml_run_id=ml_run_id,
             source_files=source_files,
+            domain_name="email_delivery",
         )
         typer.echo(
             f"\nPersisted [{run_status}]: {len(findings)} findings, "
@@ -288,7 +289,7 @@ def investigate(
                 write_investigation_report_files,
             )
 
-            store_investigation_report(run_id=run_id, report=inv_report)
+            store_investigation_report(run_id=run_id, report=inv_report, domain_name="email_delivery")
             json_path, rpt_md_path = write_investigation_report_files(
                 run_id=run_id, report=inv_report
             )
@@ -307,6 +308,7 @@ def investigate(
             findings=findings,
             hypotheses=hypotheses,
             run_id=run_id,
+            domain_name="email_delivery",
         )
         filtered = counts.get('filtered', 0)
         parts = [

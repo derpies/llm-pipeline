@@ -43,13 +43,14 @@ def _build_synthesis_input(state: InvestigationCycleState) -> str:
     if report is not None:
         try:
             structured = report.structured
-            lines.append(f"Segments analyzed: {len(structured.segment_health)}")
-            lines.append(f"Confirmed issues: {len(structured.confirmed_issues)}")
-            ts = structured.trend_summary
-            lines.append(
-                f"Trends: {ts.improving_count} improving, "
-                f"{ts.degrading_count} degrading, {ts.stable_count} stable"
-            )
+            issues = getattr(structured, "confirmed_issues", [])
+            lines.append(f"Confirmed issues: {len(issues)}")
+            ts = getattr(structured, "trend_summary", None)
+            if ts is not None:
+                lines.append(
+                    f"Trends: {ts.improving_count} improving, "
+                    f"{ts.degrading_count} degrading, {ts.stable_count} stable"
+                )
             lines.append("")
         except AttributeError:
             pass

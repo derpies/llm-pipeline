@@ -100,7 +100,7 @@ def get_investigation(run_id: str, db: Session = Depends(get_db)):
 
     return {
         "run_id": run.run_id,
-        "domain": "email_delivery",
+        "domain": getattr(run, "domain_name", "") or "email_delivery",
         "started_at": run.started_at,
         "completed_at": run.completed_at,
         "duration_seconds": duration_seconds,
@@ -114,6 +114,10 @@ def get_investigation(run_id: str, db: Session = Depends(get_db)):
         "checkpoint_digest": run.checkpoint_digest,
         "quality_warnings": _safe_json(getattr(run, "quality_warnings", "[]"), []),
         "source_files": _safe_json(getattr(run, "source_files", "[]"), []),
+        "review_status": getattr(run, "review_status", "pending"),
+        "reviewed_by": getattr(run, "reviewed_by", "") or None,
+        "review_notes": getattr(run, "review_notes", "") or None,
+        "reviewed_at": getattr(run, "reviewed_at", None),
         "findings": findings,
         "hypotheses": hypotheses,
         "synthesis_narrative": synthesis_narrative,
