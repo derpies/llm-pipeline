@@ -219,15 +219,21 @@ def review_findings(state: InvestigationCycleState) -> dict:
     ]
 
     # Run the reviewer subgraph (tool loop)
-    reviewer_graph = _get_reviewer_graph()
-    result = reviewer_graph.invoke({"messages": messages, "llm_calls": 0})
-
-    # Extract annotations from the last AI message
     annotations: list[ReviewAnnotation] = []
-    for msg in reversed(result["messages"]):
-        if isinstance(msg, AIMessage) and msg.content:
-            annotations = _parse_annotations(msg.content, findings)
-            break
+    try:
+        reviewer_graph = _get_reviewer_graph()
+        result = reviewer_graph.invoke({"messages": messages, "llm_calls": 0})
+
+        # Extract annotations from the last AI message
+        for msg in reversed(result["messages"]):
+            if isinstance(msg, AIMessage) and msg.content:
+                annotations = _parse_annotations(msg.content, findings)
+                break
+    except Exception as e:
+        logger.warning(
+            "review_findings failed run_id=%s error=%s: %s",
+            run_id, type(e).__name__, e,
+        )
 
     # Build digest
     digest_lines = [

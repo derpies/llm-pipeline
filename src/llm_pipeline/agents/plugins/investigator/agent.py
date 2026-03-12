@@ -138,9 +138,9 @@ def _call_investigator(state: InvestigatorState) -> dict:
             f"Metrics of interest: {', '.join(topic.metrics)}",
             f"Question: {topic.question}",
             f"Context: {topic.context}",
-            f"\nRun ID for all ML tool calls: {ml_run_id}",
-            f'(Pass run_id="{ml_run_id}" to every ML tool: '
-            f'{", ".join(sorted(t.name for t in tools if t.name not in _NON_ML_TOOL_NAMES))})',
+            f"\n*** IMPORTANT — YOUR RUN_ID IS: {ml_run_id} ***",
+            f"Pass run_id=\"{ml_run_id}\" to EVERY ML tool call below:",
+            f'{", ".join(sorted(t.name for t in tools if t.name not in _NON_ML_TOOL_NAMES))}',
         ]
 
         # Inject prior context for follow-up rounds
@@ -246,6 +246,42 @@ def _call_investigator(state: InvestigatorState) -> dict:
         len(messages),
         elapsed,
     )
+
+    # Early bail protection: if the LLM returns text-only (no tool calls) and
+    # has never used ML tools, retry once with a forcing nudge. This catches
+    # cases where the LLM asks for run_id despite it being in the brief.
+    if not (hasattr(response, "tool_calls") and response.tool_calls):
+        from langchain_core.messages import ToolMessage
+
+        has_queried_data = any(
+            isinstance(m, ToolMessage)
+            and getattr(m, "name", None) not in _NON_ML_TOOL_NAMES
+            for m in state["messages"]
+        )
+        if not has_queried_data:
+            logger.warning(
+                "investigator early bail detected — retrying with nudge "
+                "run_id=%s topic=%s",
+                run_id, topic.title,
+            )
+            nudge = (
+                f"You have NOT used any tools yet. The run_id is: {ml_run_id}\n"
+                f"Call an ML tool NOW. For example:\n"
+                f'get_http_anomalies(run_id="{ml_run_id}") or '
+                f'get_http_aggregations(run_id="{ml_run_id}", '
+                f'dimension="{topic.dimension}", '
+                f'dimension_value="{topic.dimension_value}")'
+            )
+            messages.append(response)
+            messages.append(HumanMessage(content=nudge))
+            get_rate_limiter().acquire()
+            try:
+                response = llm.invoke(messages)
+            except Exception:
+                pass  # Fall through with the original text response
+            else:
+                get_tracker().record(response, model=settings.model_investigator)
+
     return {"messages": [response]}
 
 

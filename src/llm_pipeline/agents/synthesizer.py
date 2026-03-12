@@ -169,18 +169,25 @@ def synthesize_narrative(state: InvestigationCycleState) -> dict:
 
     llm = get_llm(role="synthesizer")
     get_rate_limiter().acquire()
-    response = llm.invoke([
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=synthesis_input),
-    ])
-    get_tracker().record(response, model=settings.model_synthesizer)
-    usage = getattr(response, "usage_metadata", None)
-    if usage:
-        inp = (usage.get("input_tokens", 0) if isinstance(usage, dict)
-               else getattr(usage, "input_tokens", 0))
-        get_rate_limiter().record(inp)
-
-    narrative, executive_summary = _parse_synthesis(response.content)
+    try:
+        response = llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=synthesis_input),
+        ])
+        get_tracker().record(response, model=settings.model_synthesizer)
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            inp = (usage.get("input_tokens", 0) if isinstance(usage, dict)
+                   else getattr(usage, "input_tokens", 0))
+            get_rate_limiter().record(inp)
+        narrative, executive_summary = _parse_synthesis(response.content)
+    except Exception as e:
+        logger.warning(
+            "synthesize_narrative failed run_id=%s error=%s: %s",
+            run_id, type(e).__name__, e,
+        )
+        narrative = f"Synthesis failed: {type(e).__name__}"
+        executive_summary = ""
 
     digest_lines = [f"[synthesis] Narrative produced ({len(narrative)} chars)"]
     if executive_summary:
