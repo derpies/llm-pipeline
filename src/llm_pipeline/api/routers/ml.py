@@ -16,6 +16,102 @@ from llm_pipeline.email_analytics.models import (
 router = APIRouter(tags=["ml"])
 
 
+@router.get("/ml")
+def get_ml_overview(db: Session = Depends(get_db)):
+    """Cross-run ML summary: all run summaries + all anomalies + all trends."""
+    runs = (
+        db.execute(
+            select(AnalysisRunRecord).order_by(AnalysisRunRecord.started_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+
+    summaries = []
+    all_anomalies = []
+    all_trends = []
+
+    for run in runs:
+        agg_count = db.execute(
+            select(func.count()).where(AggregationRecord.run_id == run.run_id)
+        ).scalar_one()
+        anomaly_count = db.execute(
+            select(func.count()).where(AnomalyRecord.run_id == run.run_id)
+        ).scalar_one()
+        trend_count = db.execute(
+            select(func.count()).where(TrendRecord.run_id == run.run_id)
+        ).scalar_one()
+        completeness_count = db.execute(
+            select(func.count()).where(DataCompletenessRecord.run_id == run.run_id)
+        ).scalar_one()
+
+        summaries.append(
+            {
+                "run_id": run.run_id,
+                "domain": "email_delivery",
+                "started_at": run.started_at,
+                "completed_at": run.completed_at,
+                "files_processed": run.files_processed,
+                "events_parsed": run.events_parsed,
+                "counts": {
+                    "aggregations": agg_count,
+                    "anomalies": anomaly_count,
+                    "trends": trend_count,
+                    "completeness": completeness_count,
+                },
+            }
+        )
+
+        anomaly_rows = (
+            db.execute(
+                select(AnomalyRecord).where(AnomalyRecord.run_id == run.run_id)
+            )
+            .scalars()
+            .all()
+        )
+        for r in anomaly_rows:
+            all_anomalies.append(
+                {
+                    "anomaly_type": r.anomaly_type,
+                    "dimension": r.dimension,
+                    "dimension_value": r.dimension_value,
+                    "metric": r.metric,
+                    "current_value": r.current_value,
+                    "baseline_mean": r.baseline_mean,
+                    "z_score": r.z_score,
+                    "severity": r.severity,
+                    "run_id": run.run_id,
+                    "started_at": run.started_at,
+                }
+            )
+
+        trend_rows = (
+            db.execute(
+                select(TrendRecord).where(TrendRecord.run_id == run.run_id)
+            )
+            .scalars()
+            .all()
+        )
+        for r in trend_rows:
+            all_trends.append(
+                {
+                    "direction": r.direction,
+                    "dimension": r.dimension,
+                    "dimension_value": r.dimension_value,
+                    "metric": r.metric,
+                    "slope": r.slope,
+                    "r_squared": r.r_squared,
+                    "num_points": r.num_points,
+                    "start_value": r.start_value,
+                    "end_value": r.end_value,
+                    "run_id": run.run_id,
+                    "started_at": run.started_at,
+                }
+            )
+
+    return {"summaries": summaries, "anomalies": all_anomalies, "trends": all_trends}
+
+
 @router.get("/ml/{run_id}")
 def get_ml_run(run_id: str, db: Session = Depends(get_db)):
     """Get ML analysis run summary with related counts."""
@@ -41,6 +137,7 @@ def get_ml_run(run_id: str, db: Session = Depends(get_db)):
 
     return {
         "run_id": run.run_id,
+        "domain": "email_delivery",
         "started_at": run.started_at,
         "completed_at": run.completed_at,
         "files_processed": run.files_processed,
