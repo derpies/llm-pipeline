@@ -56,6 +56,15 @@ class Settings(BaseSettings):
     email_trend_r_squared_min: float = 0.5
     email_trend_slope_min: float = 0.01
 
+    # HTTP Analytics
+    http_batch_size: int = 50000
+    http_time_window_minutes: int = 1
+    http_lookback_days: int = 7
+    http_anomaly_threshold: float = 3.5
+    http_trend_min_points: int = 10
+    http_trend_r_squared_min: float = 0.5
+    http_trend_slope_min: float = 0.001
+
     # Investigation
     investigator_use_knowledge_store: bool = True
     investigator_max_llm_calls: int = 15

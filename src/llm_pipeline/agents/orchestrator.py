@@ -22,11 +22,11 @@ from llm_pipeline.tools.circuit_breaker import check_budget_exceeded
 logger = logging.getLogger(__name__)
 
 
-def _get_orchestrator_prompt() -> str:
+def _get_orchestrator_prompt(domain_name: str | None = None) -> str:
     """Build the orchestrator system prompt with domain-specific role descriptions."""
     from llm_pipeline.agents.domain_registry import get_active_domain
 
-    domain = get_active_domain()
+    domain = get_active_domain(domain_name)
     if domain and domain.orchestrator_role_prompt:
         role_descriptions = domain.orchestrator_role_prompt
     else:
@@ -87,10 +87,11 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
         f"Respond with ONLY the JSON array, no other text."
     )
 
+    domain_name = state.get("domain_name")
     get_rate_limiter().acquire()
     response = llm.invoke(
         [
-            SystemMessage(content=_get_orchestrator_prompt()),
+            SystemMessage(content=_get_orchestrator_prompt(domain_name)),
             HumanMessage(content=prompt),
         ]
     )
@@ -102,7 +103,7 @@ def orchestrator_plan(state: InvestigationCycleState) -> dict:
         get_rate_limiter().record(inp)
 
     # Parse the response into InvestigationTopics
-    topics = _parse_topics(response.content)
+    topics = _parse_topics(response.content, domain_name=domain_name)
 
     elapsed = time.monotonic() - t0
     logger.info(
@@ -238,13 +239,14 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
         "or an empty array []."
     )
 
+    domain_name = state.get("domain_name")
     evaluation_error = False
     try:
         llm = get_llm(role="orchestrator")
         get_rate_limiter().acquire()
         response = llm.invoke(
             [
-                SystemMessage(content=_get_orchestrator_prompt()),
+                SystemMessage(content=_get_orchestrator_prompt(domain_name)),
                 HumanMessage(content=eval_prompt),
             ]
         )
@@ -254,7 +256,7 @@ def orchestrator_evaluate(state: InvestigationCycleState) -> dict:
             inp = (usage.get("input_tokens", 0) if isinstance(usage, dict)
                    else getattr(usage, "input_tokens", 0))
             get_rate_limiter().record(inp)
-        follow_up_topics = _parse_topics(response.content)
+        follow_up_topics = _parse_topics(response.content, domain_name=domain_name)
     except Exception as e:
         logger.error("Orchestrator evaluation failed: %s: %s", type(e).__name__, e)
         digest_lines.append(f"[error] Orchestrator evaluation failed: {type(e).__name__}: {e}")
@@ -375,7 +377,7 @@ def orchestrator_checkpoint(state: InvestigationCycleState) -> dict:
     return {"checkpoint_digest": checkpoint_digest}
 
 
-def _parse_topics(content: str) -> list[InvestigationTopic]:
+def _parse_topics(content: str, *, domain_name: str | None = None) -> list[InvestigationTopic]:
     """Parse LLM response into InvestigationTopic list."""
     # Strip markdown code fences if present
     text = content.strip()
@@ -393,7 +395,7 @@ def _parse_topics(content: str) -> list[InvestigationTopic]:
         # Get valid roles from active domain
         from llm_pipeline.agents.domain_registry import get_domain_roles
 
-        _VALID_ROLES = set(get_domain_roles().keys())
+        _VALID_ROLES = set(get_domain_roles(domain_name).keys())
 
         # Get valid agent types from registry
         from llm_pipeline.agents.registry import get_investigation_agents

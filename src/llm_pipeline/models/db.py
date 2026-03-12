@@ -41,6 +41,7 @@ def init_db() -> None:
     """
     import llm_pipeline.agents.storage_models  # noqa: F401
     import llm_pipeline.email_analytics.models  # noqa: F401
+    import llm_pipeline.http_analytics.models  # noqa: F401
     import llm_pipeline.knowledge.models  # noqa: F401
 
     engine = get_engine()

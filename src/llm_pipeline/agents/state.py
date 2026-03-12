@@ -24,9 +24,10 @@ class InvestigationCycleState(TypedDict, total=False):
     """Top-level state for the investigation cycle graph."""
 
     # Input
-    ml_report: Any  # AnalysisReport from email_analytics
+    ml_report: Any  # AnalysisReport from ML pipeline
     run_id: str  # execution UUID
     ml_run_id: str  # ML analysis run_id (for tool queries)
+    domain_name: str  # which domain manifest to use (e.g. "email_delivery")
 
     # Planning
     investigation_plan: list[InvestigationTopic]
@@ -74,6 +75,7 @@ class InvestigatorState(MessagesState):
     topic: InvestigationTopic
     run_id: str  # execution UUID
     ml_run_id: str  # ML analysis run_id (for tool queries)
+    domain_name: str  # which domain manifest to use
     prior_context: str  # Summary of prior findings for follow-up rounds
     grounding_context: str  # Pre-fetched domain knowledge for the investigator's role
 

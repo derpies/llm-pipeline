@@ -56,22 +56,28 @@ def get_all_domains() -> dict[str, DomainManifest]:
     return _cached_manifests
 
 
-def get_active_domain() -> DomainManifest | None:
+def get_domain(name: str) -> DomainManifest | None:
+    """Return a specific domain manifest by name, or None if not found."""
+    return get_all_domains().get(name)
+
+
+def get_active_domain(domain_name: str | None = None) -> DomainManifest | None:
     """Return the active domain manifest.
 
-    For now returns the single discovered domain. When multiple domains
-    exist, this will be config-selectable.
+    If *domain_name* is provided, looks up that specific domain.
+    Otherwise falls back to the first discovered domain (backward-compat).
     """
     domains = get_all_domains()
     if not domains:
         return None
-    # Return the first (and currently only) domain
+    if domain_name:
+        return domains.get(domain_name)
     return next(iter(domains.values()))
 
 
-def get_domain_roles() -> dict[str, RoleDefinition]:
-    """Convenience: return roles from the active domain as a dict keyed by name."""
-    domain = get_active_domain()
+def get_domain_roles(domain_name: str | None = None) -> dict[str, RoleDefinition]:
+    """Convenience: return roles from a domain as a dict keyed by name."""
+    domain = get_active_domain(domain_name)
     if domain is None:
         return {}
     return {r.name: r for r in domain.roles}

@@ -444,14 +444,20 @@ def _register_domain_commands() -> None:
         # Don't crash CLI startup if domain discovery fails
         pass
 
-    # Also directly register email delivery commands (primary domain)
-    try:
-        from llm_pipeline.domains.email_delivery.cli import DOMAIN_CLI_COMMANDS
+    # Directly register domain CLI commands
+    _domain_cli_modules = [
+        "llm_pipeline.domains.email_delivery.cli",
+        "llm_pipeline.domains.http_analytics.cli",
+    ]
+    import importlib
 
-        for cmd_name, cmd_fn in DOMAIN_CLI_COMMANDS:
-            app.command(name=cmd_name)(cmd_fn)
-    except Exception:
-        pass
+    for mod_path in _domain_cli_modules:
+        try:
+            mod = importlib.import_module(mod_path)
+            for cmd_name, cmd_fn in getattr(mod, "DOMAIN_CLI_COMMANDS", []):
+                app.command(name=cmd_name)(cmd_fn)
+        except Exception:
+            pass
 
 
 _register_plugin_commands()

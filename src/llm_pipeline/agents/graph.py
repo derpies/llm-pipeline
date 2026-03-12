@@ -148,13 +148,14 @@ def _route_investigations(state: InvestigationCycleState) -> list[Send]:
     topics = state.get("investigation_plan", [])
     run_id = state.get("run_id", "")
     ml_run_id = state.get("ml_run_id", "") or run_id
+    domain_name = state.get("domain_name", "")
     logger.info("fan_out dispatching run_id=%s topic_count=%d", run_id, len(topics))
 
     sends = []
     for topic in topics:
         agent_name = getattr(topic, "agent_type", "investigator") or "investigator"
         node_name = f"investigate_{agent_name}"
-        grounding_context = get_role_grounding(topic.role)
+        grounding_context = get_role_grounding(topic.role, domain_name=domain_name or None)
         sends.append(
             Send(
                 node_name,
@@ -162,6 +163,7 @@ def _route_investigations(state: InvestigationCycleState) -> list[Send]:
                     "topic": topic,
                     "run_id": run_id,
                     "ml_run_id": ml_run_id,
+                    "domain_name": domain_name,
                     "messages": [],
                     "findings": [],
                     "hypotheses": [],
@@ -206,6 +208,7 @@ def _route_after_evaluate(
     topics = state.get("investigation_plan", [])
     run_id = state.get("run_id", "")
     ml_run_id = state.get("ml_run_id", "") or run_id
+    domain_name = state.get("domain_name", "")
 
     if not topics:
         logger.debug("routing to assemble_report run_id=%s", run_id)
@@ -222,7 +225,7 @@ def _route_after_evaluate(
     for topic in topics:
         agent_name = getattr(topic, "agent_type", "investigator") or "investigator"
         node_name = f"investigate_{agent_name}"
-        grounding_context = get_role_grounding(topic.role)
+        grounding_context = get_role_grounding(topic.role, domain_name=domain_name or None)
         sends.append(
             Send(
                 node_name,
@@ -230,6 +233,7 @@ def _route_after_evaluate(
                     "topic": topic,
                     "run_id": run_id,
                     "ml_run_id": ml_run_id,
+                    "domain_name": domain_name,
                     "messages": [],
                     "findings": [],
                     "hypotheses": [],
@@ -255,6 +259,7 @@ def _assemble_report(state: InvestigationCycleState) -> dict:
     findings = state.get("findings", [])
     hypotheses = state.get("hypotheses", [])
     digest_lines = state.get("digest_lines", [])
+    domain_name = state.get("domain_name")
 
     if ml_report is None:
         logger.warning("synthesize: no ml_report in state, skipping report assembly")
@@ -264,7 +269,7 @@ def _assemble_report(state: InvestigationCycleState) -> dict:
             ],
         }
 
-    domain = get_active_domain()
+    domain = get_active_domain(domain_name)
     if domain is None or domain.report_builder is None:
         logger.warning("synthesize: no domain report builder, skipping report assembly")
         return {

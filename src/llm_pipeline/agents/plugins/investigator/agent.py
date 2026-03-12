@@ -22,16 +22,16 @@ from llm_pipeline.tools.result import ToolStatus, parse_tool_status
 logger = logging.getLogger(__name__)
 
 
-def _build_investigator_prompt(role_name: str) -> str:
+def _build_investigator_prompt(role_name: str, domain_name: str | None = None) -> str:
     """Build the investigator system prompt with domain knowledge and role supplement."""
     from llm_pipeline.agents.domain_registry import get_active_domain
 
-    domain = get_active_domain()
+    domain = get_active_domain(domain_name)
     domain_knowledge = domain.investigator_domain_prompt if domain else ""
 
     base_prompt = INVESTIGATOR_SYSTEM_PROMPT.format(domain_knowledge=domain_knowledge)
 
-    role_supplement = get_role_prompt_supplement(role_name)
+    role_supplement = get_role_prompt_supplement(role_name, domain_name=domain_name)
     if role_supplement:
         base_prompt = f"{base_prompt}\n\n{role_supplement}"
     return base_prompt
@@ -167,7 +167,8 @@ def _call_investigator(state: InvestigatorState) -> dict:
         )
 
         # Build system prompt with role-specific supplement
-        system_prompt = _build_investigator_prompt(topic.role)
+        domain_name = state.get("domain_name")
+        system_prompt = _build_investigator_prompt(topic.role, domain_name=domain_name)
 
         messages = [
             SystemMessage(content=system_prompt),
@@ -175,7 +176,8 @@ def _call_investigator(state: InvestigatorState) -> dict:
         ]
     else:
         # Build system prompt with role-specific supplement for subsequent calls
-        system_prompt = _build_investigator_prompt(topic.role)
+        domain_name = state.get("domain_name")
+        system_prompt = _build_investigator_prompt(topic.role, domain_name=domain_name)
 
         messages = [SystemMessage(content=system_prompt)] + state["messages"]
 

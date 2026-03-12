@@ -12,11 +12,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def get_role_prompt_supplement(role_name: str) -> str:
+def get_role_prompt_supplement(role_name: str, domain_name: str | None = None) -> str:
     """Get the prompt supplement for a specialist role from the active domain."""
     from llm_pipeline.agents.domain_registry import get_domain_roles
 
-    roles = get_domain_roles()
+    roles = get_domain_roles(domain_name)
     role_def = roles.get(role_name)
     if role_def is None:
         logger.warning("Unknown role '%s', no prompt supplement available", role_name)
@@ -39,7 +39,7 @@ class _RolePromptSupplementsProxy:
 ROLE_PROMPT_SUPPLEMENTS = _RolePromptSupplementsProxy()
 
 
-def get_role_grounding(role_name: str, top_k: int = 5) -> str:
+def get_role_grounding(role_name: str, top_k: int = 5, domain_name: str | None = None) -> str:
     """Retrieve grounding context for a specialist role.
 
     Queries the Grounded tier of the knowledge store with a role-specific
@@ -51,7 +51,7 @@ def get_role_grounding(role_name: str, top_k: int = 5) -> str:
     from llm_pipeline.knowledge.models import KnowledgeTier
     from llm_pipeline.knowledge.retrieval import retrieve_knowledge
 
-    roles = get_domain_roles()
+    roles = get_domain_roles(domain_name)
     role_def = roles.get(str(role_name) if not isinstance(role_name, str) else role_name)
 
     if role_def is None or not role_def.grounding_queries:
