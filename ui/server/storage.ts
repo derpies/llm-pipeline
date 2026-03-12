@@ -33,7 +33,7 @@ export const mockMeta = {
     { name: "grounded", weight: 1.0, description: "Authoritative domain knowledge (read-only)", color: "emerald" }
   ],
   run_statuses: ["success", "partial", "failed", "dry_run"],
-  commands: ["analyze_email", "investigate"]
+  commands: ["analyze_email", "investigate", "investigate_http"]
 };
 
 const ML_RUN_1 = "d8e997d5-1a2b-4c3d-8e4f-5a6b7c8d9e0f";

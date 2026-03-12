@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Search, ChevronLeft, ChevronRight, Activity, FlaskConical, BarChart3, AlertTriangle, FileText } from "lucide-react";
 import type { PipelineRun, AnalyzeEmailRun, InvestigateRun } from "@shared/schema";
+import { isInvestigationCommand } from "@shared/schema";
 
 function formatDuration(start: string, end: string): string {
   const ms = new Date(end).getTime() - new Date(start).getTime();
@@ -48,7 +49,7 @@ export default function RunsList() {
   });
 
   const handleRowClick = (run: PipelineRun) => {
-    if (run.command === "investigate") {
+    if (isInvestigationCommand(run.command)) {
       navigate(`/investigations/${run.run_id}`);
     } else {
       navigate(`/ml/${run.run_id}`);
@@ -207,7 +208,7 @@ export default function RunsList() {
                 </TableRow>
               ) : (
                 data?.runs.map((run) => {
-                  const isInvestigation = run.command === "investigate";
+                  const isInvestigation = isInvestigationCommand(run.command);
                   const invRun = isInvestigation ? (run as InvestigateRun) : null;
                   const mlRun = !isInvestigation ? (run as AnalyzeEmailRun) : null;
                   return (

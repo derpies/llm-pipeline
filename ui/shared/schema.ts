@@ -58,7 +58,7 @@ export interface AnalyzeEmailRun extends RunBase {
 }
 
 export interface InvestigateRun extends RunBase {
-  command: "investigate";
+  command: "investigate" | "investigate_http";
   status: string;
   is_dry_run: boolean;
   label: string;
@@ -69,6 +69,10 @@ export interface InvestigateRun extends RunBase {
 }
 
 export type PipelineRun = AnalyzeEmailRun | InvestigateRun;
+
+export function isInvestigationCommand(command: string): boolean {
+  return command === "investigate" || command === "investigate_http";
+}
 
 export interface RunsResponse {
   total: number;

@@ -109,5 +109,5 @@ def get_meta():
             for t in KnowledgeTier
         ],
         "run_statuses": [s.value for s in InvestigationRunStatus],
-        "commands": ["analyze_email", "investigate"],
+        "commands": ["analyze_email", "investigate", "investigate_http"],
     }

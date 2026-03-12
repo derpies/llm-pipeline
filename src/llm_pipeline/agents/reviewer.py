@@ -10,7 +10,7 @@ import json
 import logging
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 from pydantic import TypeAdapter
 
@@ -36,10 +36,13 @@ logger = logging.getLogger(__name__)
 # Reviewer subgraph state
 # ---------------------------------------------------------------------------
 
-class _ReviewerState(dict):
-    """Internal state for the reviewer subgraph tool loop."""
+class _ReviewerState(MessagesState):
+    """Internal state for the reviewer subgraph tool loop.
 
-    pass
+    Extends MessagesState so ToolNode output is appended (not replaced).
+    """
+
+    llm_calls: int
 
 
 # ---------------------------------------------------------------------------
@@ -91,10 +94,27 @@ _VALID_ACTIONS = {e.value for e in ReviewAction}
 def _parse_annotations(content: str, findings: list[Finding]) -> list[ReviewAnnotation]:
     """Parse LLM response into ReviewAnnotation list."""
     text = content.strip()
+    if not text:
+        logger.warning("Reviewer returned empty content")
+        return []
+
     if text.startswith("```"):
         text_lines = text.split("\n")
         text_lines = [line for line in text_lines if not line.strip().startswith("```")]
-        text = "\n".join(text_lines)
+        text = "\n".join(text_lines).strip()
+        if not text:
+            logger.warning("Reviewer returned empty content after stripping code fences")
+            return []
+
+    # Try to extract JSON array from within text if not pure JSON
+    if not text.startswith("["):
+        import re
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            text = match.group(0)
+        else:
+            logger.warning("Reviewer response contains no JSON array: %.100s", text)
+            return []
 
     try:
         data = json.loads(text)
@@ -126,7 +146,7 @@ def _parse_annotations(content: str, findings: list[Finding]) -> list[ReviewAnno
 # Reviewer subgraph nodes
 # ---------------------------------------------------------------------------
 
-def _call_reviewer(state: dict) -> dict:
+def _call_reviewer(state: _ReviewerState) -> dict:
     """Invoke the reviewer LLM."""
     tools = get_tools("reviewer")
     llm = get_llm(role="reviewer").bind_tools(tools)
@@ -140,9 +160,7 @@ def _call_reviewer(state: dict) -> dict:
                else getattr(usage, "input_tokens", 0))
         get_rate_limiter().record(inp)
 
-    messages = list(state["messages"]) + [response]
-    llm_calls = state.get("llm_calls", 0) + 1
-    return {**state, "messages": messages, "llm_calls": llm_calls}
+    return {"messages": [response], "llm_calls": state.get("llm_calls", 0) + 1}
 
 
 def _reviewer_should_continue(state: dict) -> str:
@@ -161,7 +179,7 @@ def _reviewer_should_continue(state: dict) -> str:
 def _build_reviewer_subgraph():
     """Build the reviewer's internal tool loop subgraph."""
     tools = get_tools("reviewer")
-    graph = StateGraph(dict)
+    graph = StateGraph(_ReviewerState)
 
     graph.add_node("reviewer_llm", _call_reviewer)
     graph.add_node("tools", ToolNode(tools))
@@ -224,11 +242,13 @@ def review_findings(state: InvestigationCycleState) -> dict:
         reviewer_graph = _get_reviewer_graph()
         result = reviewer_graph.invoke({"messages": messages, "llm_calls": 0})
 
-        # Extract annotations from the last AI message
+        # Extract annotations from the last AI message with text content
         for msg in reversed(result["messages"]):
-            if isinstance(msg, AIMessage) and msg.content:
-                annotations = _parse_annotations(msg.content, findings)
-                break
+            if isinstance(msg, AIMessage):
+                content = msg.content if isinstance(msg.content, str) else ""
+                if content.strip():
+                    annotations = _parse_annotations(content, findings)
+                    break
     except Exception as e:
         logger.warning(
             "review_findings failed run_id=%s error=%s: %s",

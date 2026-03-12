@@ -1,0 +1,47 @@
+# Large data files — mounted at runtime, not baked into image
+raw-logs/
+output/
+
+# Local virtualenvs — container builds its own via uv sync
+.venv/
+.venv*/
+
+# Git
+.git/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Docker
+.dockerignore
+docker-compose*.yml
+
+# Claude / AI tooling
+.claude/
+.aim/
+CLAUDE.md
+
+# UI node_modules (if present on host)
+ui/client/node_modules/
+ui/server/node_modules/
+ui/node_modules/
+
+# Stale data
+chroma_data/
+
+# Misc
+*.log
+.env
+.env.*
+!.env.example
