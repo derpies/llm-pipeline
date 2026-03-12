@@ -100,6 +100,7 @@ def get_investigation(run_id: str, db: Session = Depends(get_db)):
 
     return {
         "run_id": run.run_id,
+        "domain": "email_delivery",
         "started_at": run.started_at,
         "completed_at": run.completed_at,
         "duration_seconds": duration_seconds,

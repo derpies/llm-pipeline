@@ -27,7 +27,7 @@ def _run_to_dict(row, command: str) -> dict:
         "run_id": row.run_id,
         "domain": "email_delivery",
         "command": command,
-        "created_at": getattr(row, "created_at", None),
+        "created_at": getattr(row, "created_at", None) or getattr(row, "started_at", None),
         "source_files": source_files,
     }
 
@@ -76,20 +76,24 @@ def list_runs(
 
     # ML runs
     if command is None or command == "analyze_email":
-        ml_stmt = select(AnalysisRunRecord)
-        if source_file:
-            ml_stmt = ml_stmt.where(AnalysisRunRecord.source_files.contains(source_file))
-        if search:
-            ml_stmt = ml_stmt.where(AnalysisRunRecord.run_id.contains(search))
+        # status filter: ML runs don't have a status column, skip if status is set
+        if status is None or status in (None, ""):
+            ml_stmt = select(AnalysisRunRecord)
+            if source_file:
+                ml_stmt = ml_stmt.where(AnalysisRunRecord.source_files.contains(source_file))
+            if search:
+                ml_stmt = ml_stmt.where(AnalysisRunRecord.run_id.contains(search))
 
-        ml_rows = db.execute(ml_stmt).scalars().all()
-        for row in ml_rows:
-            runs.append(_run_to_dict(row, "analyze_email"))
+            ml_rows = db.execute(ml_stmt).scalars().all()
+            for row in ml_rows:
+                runs.append(_run_to_dict(row, "analyze_email"))
 
     # Investigation runs
     if command is None or command == "investigate":
         inv_stmt = select(InvestigationRunRecord)
-        if status:
+        if status == "dry_run":
+            inv_stmt = inv_stmt.where(InvestigationRunRecord.is_dry_run.is_(True))
+        elif status:
             inv_stmt = inv_stmt.where(InvestigationRunRecord.status == status)
         if source_file:
             inv_stmt = inv_stmt.where(InvestigationRunRecord.source_files.contains(source_file))
@@ -106,7 +110,13 @@ def list_runs(
             runs.append(_run_to_dict(row, "investigate"))
 
     # Sort by created_at desc (handle None)
-    runs.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    def _sort_key(r):
+        v = r.get("created_at")
+        if v is None:
+            return ""
+        return v.isoformat() if hasattr(v, "isoformat") else str(v)
+
+    runs.sort(key=_sort_key, reverse=True)
 
     total = len(runs)
     paginated = runs[offset : offset + limit]

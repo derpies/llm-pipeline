@@ -412,9 +412,12 @@ class TestMl:
 
 
 class TestKnowledge:
-    def test_search_requires_query(self, client):
+    def test_search_without_query_browse_mode(self, client):
         resp = client.get("/api/knowledge/search")
-        assert resp.status_code == 422  # missing required param
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "total" in data
+        assert "results" in data
 
     @patch("llm_pipeline.api.routers.knowledge.retrieve_knowledge")
     def test_search_returns_results(self, mock_retrieve, client):

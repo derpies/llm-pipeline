@@ -26,7 +26,10 @@ def get_embeddings() -> Embeddings:
         from langchain_huggingface import HuggingFaceEmbeddings
 
         model_name = settings.embedding_model or _HUGGINGFACE_DEFAULT_MODEL
-        return HuggingFaceEmbeddings(model_name=model_name)
+        return HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs={"device": "cpu"},
+        )
     elif provider == "openai":
         from langchain_openai import OpenAIEmbeddings
 
