@@ -175,7 +175,7 @@ def aggregate(
                 HttpAggregationBucket(
                     time_window=row["time_window"],
                     dimension=dim,
-                    dimension_value=str(row[dim]),
+                    dimension_value=str(row[dim]).replace("\x00", ""),
                     total=total,
                     status_2xx=s2,
                     status_3xx=row["status_3xx"],
@@ -247,7 +247,7 @@ def compute_data_completeness(
                     HttpDataCompleteness(
                         time_window=row["time_window"],
                         dimension=dim,
-                        dimension_value=str(row[dim]),
+                        dimension_value=str(row[dim]).replace("\x00", ""),
                         total_records=total,
                         field_name=field_name,
                         empty_count=empty_count,

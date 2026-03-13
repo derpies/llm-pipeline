@@ -97,7 +97,7 @@ class ReviewAnnotation(BaseModel):
     assessment: ReviewAssessment
     reasoning: str
     suggested_action: ReviewAction
-    follow_up_question: str = ""
+    follow_up_question: str | None = ""
 
 
 class AnalyticalStrategy(BaseModel):
