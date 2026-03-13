@@ -27,7 +27,7 @@ Distinguish between expected errors (scanners hitting invalid paths) and unexpec
         "HTTP status codes, error rates, 4xx 5xx patterns, "
         "edge rejection, upstream errors, content availability",
     ],
-    grounding_kb_prefixes=[],
+    grounding_kb_prefixes=["KB-HTTP-03", "KB-HTTP-07"],
 )
 
 LATENCY = RoleDefinition(
@@ -45,7 +45,7 @@ Compare latency patterns across hosts, request categories, and time windows.""",
         "HTTP latency, time to serve, response time, "
         "upstream performance, backend latency, p95 p99",
     ],
-    grounding_kb_prefixes=[],
+    grounding_kb_prefixes=["KB-HTTP-01", "KB-HTTP-02"],
 )
 
 SECURITY = RoleDefinition(
@@ -64,7 +64,7 @@ Categorize threats by severity: active scanners > passive bots > legitimate auto
         "HTTP bot detection, vulnerability scanning, PHP probes, "
         "scanner fingerprints, empty user-agent, security threats",
     ],
-    grounding_kb_prefixes=[],
+    grounding_kb_prefixes=["KB-HTTP-05", "KB-HTTP-06", "KB-HTTP-07"],
 )
 
 TRAFFIC = RoleDefinition(
@@ -83,7 +83,7 @@ Look for capacity signals: are any hosts or upstreams approaching limits?""",
         "HTTP traffic analysis, throughput, load balancing, "
         "request volume, capacity planning, traffic distribution",
     ],
-    grounding_kb_prefixes=[],
+    grounding_kb_prefixes=["KB-HTTP-04", "KB-HTTP-05", "KB-HTTP-01"],
 )
 
 ALL_ROLES = [ERROR_ANALYSIS, LATENCY, SECURITY, TRAFFIC]

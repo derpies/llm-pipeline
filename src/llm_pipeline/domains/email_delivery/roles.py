@@ -27,7 +27,7 @@ Compare metrics across segments sharing the same IP pool.""",
         "warming, feedback loops, deferral patterns, shared IP risk",
     ],
     grounding_kb_prefixes=[
-        "KB-03", "KB-09-37", "KB-09-38", "KB-09-42", "KB-11-53",
+        "KB-EMAIL-03", "KB-EMAIL-09-37", "KB-EMAIL-09-38", "KB-EMAIL-09-42", "KB-EMAIL-11-53",
     ],
 )
 
@@ -46,7 +46,7 @@ Cross-reference compliance failures with bounce codes (550 5.7.x).""",
         "compliance failures, policy alignment, email authentication",
     ],
     grounding_kb_prefixes=[
-        "KB-02", "KB-09-39",
+        "KB-EMAIL-02", "KB-EMAIL-09-39",
     ],
 )
 
@@ -65,7 +65,7 @@ Compare engagement segment metrics against expected baselines.""",
         "subscriber recency, complaint rates, list hygiene",
     ],
     grounding_kb_prefixes=[
-        "KB-05", "KB-07-30", "KB-11-51", "KB-09-43", "KB-09-44",
+        "KB-EMAIL-05", "KB-EMAIL-07-30", "KB-EMAIL-11-51", "KB-EMAIL-09-43", "KB-EMAIL-09-44",
     ],
 )
 
@@ -84,7 +84,7 @@ Group findings by provider and compare delivery patterns across them.""",
         "inbox placement, provider-specific bounce codes, rate limiting",
     ],
     grounding_kb_prefixes=[
-        "KB-06", "KB-10", "KB-07-28", "KB-07-29", "KB-12-54",
+        "KB-EMAIL-06", "KB-EMAIL-10", "KB-EMAIL-07-28", "KB-EMAIL-07-29", "KB-EMAIL-12-54",
     ],
 )
 
@@ -103,8 +103,8 @@ Start broad, then narrow to the most impactful signal.""",
         "data completeness, trend analysis, delivery lifecycle",
     ],
     grounding_kb_prefixes=[
-        "KB-01", "KB-04", "KB-07-31", "KB-08", "KB-09-41",
-        "KB-09-45", "KB-11-50", "KB-11-52",
+        "KB-EMAIL-01", "KB-EMAIL-04", "KB-EMAIL-07-31", "KB-EMAIL-08", "KB-EMAIL-09-41",
+        "KB-EMAIL-09-45", "KB-EMAIL-11-50", "KB-EMAIL-11-52",
     ],
 )
 
